@@ -8,7 +8,6 @@ Zip Cracker is a ~~powerful~~, modern, and ~~efficient~~ tool for cracking passw
 - Dictionary-based attack using custom wordlists
 - Brute-force attack with adjustable character sets and lengths
 - Progress bar for real-time updates on cracking progress
-- Cross-platform compatibility
 
 ## Table of Contents
 
@@ -20,7 +19,7 @@ Zip Cracker is a ~~powerful~~, modern, and ~~efficient~~ tool for cracking passw
 
 ## Installation
 
-You can download the precompiled binaries for Linux, ~~macOS~~, and Windows from the [Releases](https://github.com/fresh-milkshake/zip-cracker/releases) page. Extract the archive and place the binary in a directory listed in your system's `PATH` environment variable for easy access.
+You can download the precompiled binaries for Windows from the [Releases](https://github.com/fresh-milkshake/zip-cracker/releases) page. Extract the archive and place the binary in a directory listed in your system's `PATH` environment variable for easy access.
 
 ## Usage
 
