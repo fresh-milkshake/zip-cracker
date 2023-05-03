@@ -1,4 +1,10 @@
+
+![Image](Sprite-0001.png)
+
 # Zip Cracker
+
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
+[![GitHub release](https://img.shields.io/github/release/fresh-milkshake/zip-cracker.svg)](https://github.com/fresh-milkshake/zip-cracker/releases)
 
 Zip Cracker is a ~~powerful~~, modern, and ~~efficient~~ tool for cracking password-protected ZIP files. Utilizing Rust's performance capabilities and parallel computing, this tool provides a fast and convenient solution for recovering lost or forgotten passwords for encrypted ZIP files. The program supports both dictionary-based and brute-force attacks.
 
