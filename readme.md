@@ -77,7 +77,7 @@ To build Zip Cracker from source, follow these steps:
 2. Clone the repository:
 
     ```bash
-    $ git clone https://github.com/yourusername/zip-cracker.git
+    $ git clone https://github.com/fresh-milkshake/zip-cracker
     ```
 
 3. Change to the project directory:
