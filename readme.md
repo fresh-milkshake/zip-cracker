@@ -94,16 +94,6 @@ To build Zip Cracker from source, follow these steps:
 
 5. The compiled binary can be found in `target/release/zip-cracker`.
 
-## Contributing
-
-We welcome contributions to the Zip Cracker project! If you're interested in contributing, please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch with a descriptive name.
-3. Commit your changes to the new branch.
-4. Create a pull request describing the changes you've made.
-5. We'll review your pull request and provide feedback or merge it if everything looks good.
-
 ## License
 
 This project is licensed under the [MIT License](LICENSE.txt). Please see the [LICENSE](LICENSE.txt) file for more information.
