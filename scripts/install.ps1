@@ -1,17 +1,12 @@
-# Zip Cracker - Automatic Installation Script for Windows PowerShell
-# Usage: Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fresh-milkshake/zip-cracker/master/scripts/install.ps1" -UseBasicParsing | Invoke-Expression
-
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\zip-cracker",
     [switch]$Force
 )
 
-# Configuration
 $RepoOwner = "fresh-milkshake"
 $RepoName = "zip-cracker"
-$BinaryName = "zip-cracker.exe"
+$BinaryName = "zip-cracker-windows-x64.exe"
 
-# Colors for output
 $Colors = @{
     Red = "Red"
     Green = "Green"
@@ -75,7 +70,6 @@ function Install-Binary {
     Write-ColorMessage "Downloading zip-cracker from $downloadUrl..." "Blue"
     
     try {
-        # Download the binary
         Invoke-WebRequest -Uri $downloadUrl -OutFile $tempFile -UseBasicParsing
         
         if (-not (Test-Path $tempFile)) {
@@ -84,28 +78,23 @@ function Install-Binary {
         
         Write-ColorMessage "Extracting archive..." "Blue"
         
-        # Create extraction directory
         if (Test-Path $extractDir) {
             Remove-Item $extractDir -Recurse -Force
         }
         New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
         
-        # Extract the archive
         if ($PSVersionTable.PSVersion.Major -ge 5) {
             Expand-Archive -Path $tempFile -DestinationPath $extractDir -Force
         } else {
-            # Fallback for older PowerShell versions
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             [System.IO.Compression.ZipFile]::ExtractToDirectory($tempFile, $extractDir)
         }
         
-        # Create install directory
         if (-not (Test-Path $InstallDir)) {
             New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
             Write-ColorMessage "Created installation directory: $InstallDir" "Blue"
         }
         
-        # Find and move the binary
         $binaryPath = Get-ChildItem -Path $extractDir -Name $BinaryName -Recurse | Select-Object -First 1
         if ($binaryPath) {
             $sourcePath = Join-Path $extractDir $binaryPath
@@ -132,7 +121,6 @@ function Install-Binary {
         return $false
     }
     finally {
-        # Clean up temporary files
         if (Test-Path $tempFile) {
             Remove-Item $tempFile -Force
         }
@@ -145,7 +133,6 @@ function Install-Binary {
 function Add-ToPath {
     Write-ColorMessage "Configuring PATH environment variable..." "Blue"
     
-    # Get current user PATH
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     
     if ($currentPath -and $currentPath.Split(';') -contains $InstallDir) {
@@ -154,13 +141,9 @@ function Add-ToPath {
     }
     
     try {
-        # Add to user PATH
         $newPath = if ($currentPath) { "$currentPath;$InstallDir" } else { $InstallDir }
         [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
-        
-        # Update current session PATH
         $env:PATH = "$env:PATH;$InstallDir"
-        
         Write-ColorMessage "Added $InstallDir to user PATH" "Green"
         Write-ColorMessage "PATH will be available in new terminal sessions" "Blue"
     }
@@ -177,7 +160,6 @@ function Test-Installation {
         Write-ColorMessage "Installation successful!" "Green"
         Write-ColorMessage "Binary location: $binaryPath" "Blue"
         
-        # Test if binary works
         try {
             & $binaryPath --help | Out-Null
             Write-ColorMessage "Binary is working correctly" "Green"
@@ -218,13 +200,11 @@ function Main {
     Write-ColorMessage "This script will download and install zip-cracker to $InstallDir" "Blue"
     Write-ColorMessage ""
     
-    # Check PowerShell version
     if ($PSVersionTable.PSVersion.Major -lt 3) {
         Write-ColorMessage "Error: PowerShell 3.0 or higher is required" "Red"
         exit 1
     }
     
-    # Check if running as Administrator for system-wide installation
     $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     $isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     
@@ -259,14 +239,11 @@ function Main {
     }
 }
 
-# Check if script is being piped from web or run locally
 if ($MyInvocation.MyCommand.Path) {
-    # Script is being run locally, show usage if no parameters
     if (-not $PSBoundParameters.Count -and -not $args.Count) {
         Show-Usage
         return
     }
 }
 
-# Run the installer
 Main
