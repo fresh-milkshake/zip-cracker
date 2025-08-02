@@ -5,7 +5,7 @@ param(
 
 $RepoOwner = "fresh-milkshake"
 $RepoName = "zip-cracker"
-$BinaryName = "zip-cracker-windows-x64.exe"
+$BinaryName = "zip-cracker.exe"
 
 $Colors = @{
     Red = "Red"
@@ -62,10 +62,9 @@ function Install-Binary {
         [string]$Architecture
     )
     
-    $downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/zip-cracker-$Version-windows-$Architecture.zip"
+    $downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/zip-cracker-windows-x64.exe"
     $tempDir = [System.IO.Path]::GetTempPath()
-    $tempFile = Join-Path $tempDir "zip-cracker-$Version.zip"
-    $extractDir = Join-Path $tempDir "zip-cracker-extract"
+    $tempFile = Join-Path $tempDir "zip-cracker-$Version.exe"
     
     Write-ColorMessage "Downloading zip-cracker from $downloadUrl..." "Blue"
     
@@ -76,43 +75,23 @@ function Install-Binary {
             throw "Download failed: File not found"
         }
         
-        Write-ColorMessage "Extracting archive..." "Blue"
-        
-        if (Test-Path $extractDir) {
-            Remove-Item $extractDir -Recurse -Force
-        }
-        New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
-        
-        if ($PSVersionTable.PSVersion.Major -ge 5) {
-            Expand-Archive -Path $tempFile -DestinationPath $extractDir -Force
-        } else {
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            [System.IO.Compression.ZipFile]::ExtractToDirectory($tempFile, $extractDir)
-        }
-        
         if (-not (Test-Path $InstallDir)) {
             New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
             Write-ColorMessage "Created installation directory: $InstallDir" "Blue"
         }
         
-        $binaryPath = Get-ChildItem -Path $extractDir -Name $BinaryName -Recurse | Select-Object -First 1
-        if ($binaryPath) {
-            $sourcePath = Join-Path $extractDir $binaryPath
-            $destPath = Join-Path $InstallDir $BinaryName
-            
-            if ((Test-Path $destPath) -and -not $Force) {
-                $response = Read-Host "Binary already exists at $destPath. Overwrite? (y/N)"
-                if ($response -notmatch '^[Yy]') {
-                    Write-ColorMessage "Installation cancelled by user." "Yellow"
-                    return $false
-                }
+        $destPath = Join-Path $InstallDir $BinaryName
+        
+        if ((Test-Path $destPath) -and -not $Force) {
+            $response = Read-Host "Binary already exists at $destPath. Overwrite? (y/N)"
+            if ($response -notmatch '^[Yy]') {
+                Write-ColorMessage "Installation cancelled by user." "Yellow"
+                return $false
             }
-            
-            Copy-Item $sourcePath $destPath -Force
-            Write-ColorMessage "Binary installed to $destPath" "Green"
-        } else {
-            throw "Binary not found in archive"
         }
+        
+        Copy-Item $tempFile $destPath -Force
+        Write-ColorMessage "Binary installed to $destPath" "Green"
         
         return $true
     }
@@ -123,9 +102,6 @@ function Install-Binary {
     finally {
         if (Test-Path $tempFile) {
             Remove-Item $tempFile -Force
-        }
-        if (Test-Path $extractDir) {
-            Remove-Item $extractDir -Recurse -Force
         }
     }
 }
