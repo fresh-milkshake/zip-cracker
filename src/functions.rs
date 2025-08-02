@@ -7,7 +7,6 @@ use std::io::{BufRead, BufReader, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::iter::repeat_with;
 
 fn is_right_password(archive: &mut ZipArchive<File>, password: &str) -> bool {
     if let Ok(Ok(mut zip)) = archive.by_index_decrypt(0, password.as_bytes()) {
@@ -54,27 +53,25 @@ pub fn send_passwords_from_file(
 
     builder.spawn(move || {
         let file = File::open(&dict_path).expect("Failed to open dictionary file");
-        let reader = BufReader::new(file).lines();
-        let lines_count = reader.count() as u64;
+        let lines: Vec<String> = BufReader::new(file)
+            .lines()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Failed to read dictionary file");
 
-        let pb = ProgressBar::new(lines_count);
+        let pb = ProgressBar::new(lines.len() as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {eta} {msg}")
             .expect("Failed to set progress bar style")
             .progress_chars("=>-"));
 
-        let file = File::open(&dict_path).expect("Failed to open dictionary file");
-        let reader = BufReader::new(file).lines();
-        for line in reader {
+        for line in lines {
             if is_password_found.load(Ordering::Relaxed) {
                 break;
-            } else if let Ok(line_content) = line {
-                if send_password.send(line_content).is_err() {
-                    break;
-                } else {
-                    pb.inc(1);
-                }
             }
+            if send_password.send(line).is_err() {
+                break;
+            }
+            pb.inc(1);
         }
         pb.finish();
     }).expect("Failed to spawn thread")
@@ -117,8 +114,6 @@ use rayon::prelude::*;
 pub fn generate_attack(
     zip_path: &str,
     is_password_found: Arc<AtomicBool>,
-    receive_password: Receiver<String>,
-    send_found: Sender<String>,
 ) {
     let zip_archive = Arc::new(Mutex::new(
         ZipArchive::new(File::open(zip_path).expect("Failed to open zip file"))
@@ -146,13 +141,13 @@ pub fn generate_attack(
                 false
             } else {
                 let mut zip_archive_guard = zip_archive.lock().unwrap();
-                let result = is_right_password(&mut *zip_archive_guard, &password);
+                let result = is_right_password(&mut zip_archive_guard, password);
                 drop(zip_archive_guard);
 
                 if result {
                     is_password_found.store(true, Ordering::Relaxed);
                     println!("Password found: {}", password);
-                    send_found.send(password.clone()).is_ok()
+                    true
                 } else {
                     false
                 }

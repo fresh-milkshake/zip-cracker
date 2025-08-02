@@ -1,21 +1,21 @@
 [package]
 name = "zip-cracker"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
-default-run = "main"
+default-run = "zip-cracker"
 
 [[bin]]
 name = "experiments"
 path = "src/concurrent_experiments.rs"
 
 [[bin]]
-name = "main"
+name = "zip-cracker"
 path = "src/main.rs"
 
 [dependencies]
 crossbeam-channel = "0.5.6"
 zip = "0.6.3"
-clap = "3.0.0-beta.2"
+clap = { version = "4.0", features = ["derive"] }
 indicatif = "0.17.3"
 num_cpus = "1.14.0"
 rayon = "1.7.0"

@@ -18,11 +18,13 @@ Zip Cracker is a ~~powerful~~, modern, and ~~efficient~~ tool for cracking passw
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Usage](#usage)
-- [Building from Source](#building-from-source)
-- [Contributing](#contributing)
-- [License](#license)
+- [Zip Cracker](#zip-cracker)
+  - [Features](#features)
+  - [Table of Contents](#table-of-contents)
+  - [Installation](#installation)
+  - [Usage](#usage)
+  - [Building from Source](#building-from-source)
+  - [License](#license)
 
 ## Installation
 

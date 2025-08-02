@@ -2,3 +2,4 @@
 *.zip
 /dictionaries
 *.exe
+.gitignore
