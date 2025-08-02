@@ -40,10 +40,11 @@ detect_platform() {
 
     case "$arch" in
         x86_64|amd64)
-            ARCH="x64"
+            ARCH="x86_64"
             ;;
         *)
             print_message $RED "Error: Unsupported architecture: $arch"
+            print_message $RED "Only x86_64/amd64 architecture is supported"
             exit 1
             ;;
     esac
@@ -82,9 +83,9 @@ install_binary() {
     local download_url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$LATEST_VERSION/$RELEASE_ASSET_NAME"
     local temp_dir
     temp_dir=$(mktemp -d)
-    local temp_file="$temp_dir/$RELEASE_ASSET_NAME"
+    local temp_file="$temp_dir/zip-cracker"
 
-    print_message $BLUE "Downloading $RELEASE_ASSET_NAME from $download_url..."
+    print_message $BLUE "Downloading zip-cracker from $download_url..."
 
     if command -v curl >/dev/null 2>&1; then
         curl -L "$download_url" -o "$temp_file"

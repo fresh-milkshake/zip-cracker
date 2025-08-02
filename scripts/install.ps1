@@ -27,9 +27,9 @@ function Get-Architecture {
     $arch = $env:PROCESSOR_ARCHITECTURE
     switch ($arch) {
         "AMD64" { return "x86_64" }
-        "ARM64" { return "arm64" }
         default { 
             Write-ColorMessage "Error: Unsupported architecture: $arch" "Red"
+            Write-ColorMessage "Only x86_64/AMD64 architecture is supported" "Red"
             exit 1
         }
     }
