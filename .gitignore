@@ -3,3 +3,7 @@
 /dictionaries
 *.exe
 .gitignore
+/vscode
+/tests
+TODO.md
+/notes
