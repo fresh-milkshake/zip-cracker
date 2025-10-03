@@ -1,5 +1,4 @@
-
-![Image](Sprite-0001.png)
+![Image](assets/Sprite-0001.png)
 
 # Overview
 
