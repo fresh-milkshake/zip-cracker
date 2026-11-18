@@ -84,25 +84,6 @@ zip-cracker archive.zip -d words.txt
 Use one password per line. Progress counts passwords actually checked by workers,
 not candidates waiting in the queue.
 
-### Output
-
-Important results are green, mode and phase headings use accent colors, errors
-are red, and paths and supporting details are dimmed. Generation and dictionary
-search show checked counts, speed and ETA. The bkcrack mode displays its current
-phase progress. Terminal rendering is limited to five updates per second, with
-candidate counters updated in batches.
-
-Colors are automatic and respect `NO_COLOR` and redirected output. Override them
-with `--color always` or `--color never`; dynamic progress bars stay hidden in
-redirected streams. Run `zip-cracker --help` for all options.
-
-Screenshots combine intermediate progress and final results from real runs with
-[Freeze](https://github.com/charmbracelet/freeze). After a release build, run
-`pwsh ./scripts/screenshots.ps1` with Freeze installed at `target/freeze/freeze.exe`,
-or supply its location through `-FreezePath`. The recovery example also needs
-bkcrack at `target/bkcrack-1.8.1/bkcrack.exe`, or a location supplied through
-`-BkcrackPath`.
-
 ## Building from Source
 
 To build Zip Cracker from source, follow these steps:
