@@ -34,6 +34,8 @@ impl PreparedFilter {
                 prefix_index = 0;
             }
         }
+        // Keep byte position outermost to interleave four independent key chains.
+        #[allow(clippy::needless_range_loop)]
         for position in self.prefix_length..length {
             for lane in 0..4 {
                 keys[lane].update(passwords[lane][position]);
@@ -61,6 +63,8 @@ impl HeaderFilter {
         length: usize,
     ) -> [bool; 4] {
         let mut keys = [Keys::new(); 4];
+        // Keep byte position outermost to interleave four independent key chains.
+        #[allow(clippy::needless_range_loop)]
         for position in 0..length {
             for lane in 0..4 {
                 keys[lane].update(passwords[lane][position]);
