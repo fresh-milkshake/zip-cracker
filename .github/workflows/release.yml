@@ -39,10 +39,9 @@ jobs:
       id: check_tag
       run: |
         TAG_NAME="${{ steps.get_version.outputs.tag_name }}"
-        if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-          echo "❌ Tag $TAG_NAME already exists! Skipping build and release."
+        if git show-ref --verify --quiet "refs/tags/$TAG_NAME"; then
+          echo "Tag $TAG_NAME already exists; skipping release."
           echo "should_release=false" >> $GITHUB_OUTPUT
-          exit 1
         else
           echo "✅ Tag $TAG_NAME does not exist, proceeding with build and release"
           echo "should_release=true" >> $GITHUB_OUTPUT
@@ -51,7 +50,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
     - uses: actions/checkout@v4
     
@@ -70,10 +68,10 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --locked --all-targets --verbose
     
     - name: Run clippy
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --locked --all-targets -- -D warnings
 
   build-pr:
     name: Build PR
@@ -103,7 +101,7 @@ jobs:
   build:
     name: Build
     runs-on: ${{ matrix.os }}
-    needs: [version-check]
+    needs: [version-check, test]
     if: github.event_name == 'push' && needs.version-check.outputs.should_release == 'true'
     strategy:
       matrix:
@@ -178,7 +176,7 @@ jobs:
     
     - name: Create Release
       id: create_release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ needs.version-check.outputs.tag_name }}
         name: Release ${{ needs.version-check.outputs.tag_name }}
