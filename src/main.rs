@@ -1,262 +1,112 @@
-// main.rs
 mod bkcrack;
+mod cli;
 mod functions;
 mod generator;
 mod mask;
+mod presentation;
+
 mod zipcrypto;
 
-use functions::{dictionary_attack, send_passwords_from_file};
-use generator::{generate_attack, GenerationOptions, DEFAULT_CHARSET};
+use cli::Args;
+use crossbeam_channel::bounded;
+use functions::{dictionary_attack, send_passwords};
+use generator::{generate_attack, GenerationOptions};
 use mask::{generate_mask_attack, Mask};
-
-use clap::{ArgGroup, Parser};
-use crossbeam_channel::{bounded, select};
 use std::fs::File;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::{BufRead, BufReader};
+use std::time::Instant;
+
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
-use zip::result::ZipError::UnsupportedArchive;
-use zip::ZipArchive;
+use zip::{result::ZipError, ZipArchive};
 
-#[derive(Parser)]
-#[command(name = "zip-cracker")]
-#[command(about = "A tool for cracking password-protected ZIP files")]
-#[command(group(ArgGroup::new("parallel_mode").args(["generate", "bkcrack"]).multiple(false)))]
-struct Args {
-    #[arg(help = "The zip file to bruteforce")]
-    zip: String,
+type AppResult = Result<(), Box<dyn std::error::Error>>;
 
-    #[arg(short, long, help = "Path to the dictionary to use for bruteforce")]
-    dict: Option<String>,
-
-    #[arg(short, long, help = "Use brute-force generation")]
-    generate: bool,
-
-    #[arg(
-        long,
-        help = "Automatically infer known plaintext and run bkcrack",
-        conflicts_with = "dict"
-    )]
-    bkcrack: bool,
-
-    #[arg(long, requires = "bkcrack", help = "Path to the bkcrack executable")]
-    bkcrack_path: Option<std::path::PathBuf>,
-
-    #[arg(
-        long,
-        requires = "bkcrack",
-        help = "Destination ZIP (default: NAME.unlocked.zip; never overwrites)"
-    )]
-    decrypt: Option<std::path::PathBuf>,
-
-    #[arg(
-        long,
-        requires = "bkcrack",
-        help = "Show automatic plaintext assumptions without running an attack"
-    )]
-    dry_run: bool,
-
-    #[arg(
-        long,
-        default_value_t = 180,
-        requires = "bkcrack",
-        help = "Total bkcrack attack/decryption budget in seconds"
-    )]
-    bkcrack_seconds: u64,
-
-    #[arg(
-        long,
-        default_value_t = 60,
-        requires = "bkcrack",
-        help = "Seconds per format variant; structural headers and verified copies use the total budget"
-    )]
-    attempt_seconds: u64,
-
-    #[arg(long, help = "Search a mask: ?l lowercase, ?u uppercase, ?d digits, ?s symbols, ?a ASCII, ?? literal ?", requires = "generate", conflicts_with_all = ["min_length", "max_length", "charset"])]
-    mask: Option<String>,
-
-    #[arg(long, default_value_t = 1, requires = "generate")]
-    min_length: u32,
-
-    #[arg(long, default_value_t = 8, requires = "generate")]
-    max_length: u32,
-
-    #[arg(long, default_value = DEFAULT_CHARSET, requires = "generate")]
-    charset: String,
-
-    #[arg(
-        long,
-        help = "Worker count (default: available logical CPUs)",
-        requires = "parallel_mode"
-    )]
-    threads: Option<usize>,
-
-    #[arg(
-        long,
-        help = "Stop after this many generated candidates",
-        requires = "generate"
-    )]
-    limit: Option<u64>,
-
-    #[arg(short, long, help = "Prints more information")]
-    verbose: bool,
+fn check_archive(path: &str) -> AppResult {
+    let mut archive = ZipArchive::new(File::open(path)?)?;
+    let result = match archive.by_index(0) {
+        Err(ZipError::UnsupportedArchive("Password required to decrypt file")) => Ok(()),
+        Ok(_) => Err("The zip file is not encrypted".into()),
+        Err(error) => Err(error.into()),
+    };
+    result
 }
 
-fn is_encrypted(zip_archive: &mut ZipArchive<File>) -> bool {
-    let zip_result = zip_archive.by_index(0);
-    match zip_result {
-        Ok(_) => false,
-        Err(UnsupportedArchive(msg)) => msg == "Password required to decrypt file",
-        Err(e) => {
-            eprintln!("Error reading zip file: {:?}", e);
-            false
-        }
-    }
-}
-
-fn run_dictionary_attack(zip_path: &str, dict_path: &str, verbose: bool) {
-    let password_found = Arc::new(AtomicBool::new(false));
-
-    let file = match File::open(zip_path) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error opening zip file: {}", e);
-            return;
-        }
-    };
-
-    let mut zip_archive = match ZipArchive::new(file) {
-        Ok(archive) => archive,
-        Err(e) => {
-            eprintln!("Error reading zip archive: {}", e);
-            return;
-        }
-    };
-
-    if !is_encrypted(&mut zip_archive) {
-        eprintln!("The zip file is not encrypted");
-        return;
-    }
-
+fn run_dictionary_attack(zip_path: &str, dict_path: &str, verbose: bool) -> AppResult {
+    check_archive(zip_path)?;
+    let started = Instant::now();
+    let lines = BufReader::new(File::open(dict_path)?)
+        .lines()
+        .collect::<Result<Vec<_>, _>>()?;
+    let progress = presentation::progress(lines.len() as u64, "Dictionary");
+    presentation::detail(format!(
+        "Wordlist  {dict_path} · {} candidates",
+        lines.len()
+    ));
+    let found = Arc::new(AtomicBool::new(false));
     let (send_password, receive_password) = bounded(100_000);
     let (send_found, receive_found) = bounded(1);
     let mut workers = Vec::new();
-
-    for index in 0..num_cpus::get_physical() {
+    for index in 0..num_cpus::get_physical().max(1) {
         if verbose {
-            println!("Starting worker {}...", index);
+            presentation::note(&format!("Starting worker {index}"));
         }
-        let worker = dictionary_attack(
+        workers.push(dictionary_attack(
             index,
             zip_path,
-            password_found.clone(),
+            found.clone(),
             receive_password.clone(),
             send_found.clone(),
-        );
-        workers.push(worker);
+            progress.clone(),
+        ));
     }
-
-    if !dict_path.is_empty() {
-        if verbose {
-            println!("Starting password sender...");
-        }
-        let password_sender =
-            send_passwords_from_file(password_found.clone(), send_password, dict_path.to_string());
-        password_sender.join().unwrap();
-    }
-
-    select! {
-        recv(receive_found) -> result => match result {
-            Ok(password) => println!("Password found: {}", password),
-            Err(e) => {
-                eprintln!("Error while receiving password: {:?}", e);
-                return;
-            }
-        },
-        default(Duration::from_secs(10)) => {
-            if verbose {
-                println!("No password found");
-            }
-        }
-    }
-
-    password_found.store(true, Ordering::SeqCst);
-
+    drop(receive_password);
+    drop(send_found);
+    let sender = send_passwords(found, send_password, lines);
+    sender.join().map_err(|_| "Wordlist reader failed")?;
     for worker in workers {
-        worker.join().unwrap();
+        worker.join().map_err(|_| "Dictionary worker failed")?;
     }
+    progress.finish_and_clear();
+    if let Ok(password) = receive_found.try_recv() {
+        presentation::success("Password found:", password);
+    } else {
+        presentation::note("No password found in the wordlist");
+    }
+    presentation::statistics(progress.position(), started.elapsed());
+    Ok(())
 }
 
 fn run_generate_attack(
     zip_path: &str,
-    verbose: bool,
     options: &GenerationOptions,
     mask: Option<&Mask>,
-) {
-    let password_found = Arc::new(AtomicBool::new(false));
-
-    let file = match File::open(zip_path) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error opening zip file: {}", e);
-            return;
-        }
-    };
-
-    let mut zip_archive = match ZipArchive::new(file) {
-        Ok(archive) => archive,
-        Err(e) => {
-            eprintln!("Error reading zip archive: {}", e);
-            return;
-        }
-    };
-
-    if !is_encrypted(&mut zip_archive) {
-        eprintln!("The zip file is not encrypted");
-        return;
-    }
-
-    if verbose {
-        println!("Starting brute-force generator...");
-    }
-
+) -> AppResult {
+    check_archive(zip_path)?;
+    let cancelled = AtomicBool::new(false);
     let result = if let Some(mask) = mask {
-        generate_mask_attack(
-            zip_path,
-            mask,
-            options.threads,
-            options.limit,
-            &password_found,
-        )
+        generate_mask_attack(zip_path, mask, options.threads, options.limit, &cancelled)?
     } else {
-        generate_attack(zip_path, options, &password_found)
+        generate_attack(zip_path, options, &cancelled)?
     };
-    match result {
-        Ok(result) => {
-            if let Some(password) = result.password {
-                println!("Password found: {}", password);
-            } else {
-                println!("No password found in the searched candidates");
-            }
-            let seconds = result.elapsed.as_secs_f64();
-            println!(
-                "Checked {} passwords in {:.3}s ({:.0} passwords/s)",
-                result.checked,
-                seconds,
-                result.checked as f64 / seconds.max(f64::EPSILON)
-            );
-        }
-        Err(error) => {
-            eprintln!("Generation failed: {}", error);
-            std::process::exit(1);
-        }
+    let matched = result.password.is_some();
+    if let Some(password) = result.password {
+        presentation::success("Password found:", password);
+    } else {
+        presentation::note("No password found in the searched candidates");
     }
+    presentation::statistics(result.checked, result.elapsed);
+    if matched {
+        presentation::detail("Full entry verification passed.");
+    }
+    println!();
+    Ok(())
 }
 
-fn main() {
-    let args = Args::parse();
-
+fn execute(args: Args) -> AppResult {
+    let path = args.zip.as_str();
     if args.bkcrack {
+        presentation::heading("Automatic recovery", path);
         let options = bkcrack::Options {
             executable: args.bkcrack_path,
             output: args.decrypt,
@@ -266,10 +116,8 @@ fn main() {
             dry_run: args.dry_run,
             verbose: args.verbose,
         };
-        if let Err(error) = bkcrack::run(std::path::Path::new(&args.zip), &options) {
-            eprintln!("bkcrack mode: {error}");
-            std::process::exit(1);
-        }
+        bkcrack::run(std::path::Path::new(path), &options)
+            .map_err(|error| format!("bkcrack mode: {error}").into())
     } else if args.generate {
         let options = GenerationOptions {
             min_length: args.min_length,
@@ -284,12 +132,12 @@ fn main() {
             .map(Mask::parse)
             .transpose()
             .unwrap_or_else(|error| {
-                eprintln!("Invalid mask: {}", error);
+                presentation::error(&format!("Invalid mask: {error}"));
                 std::process::exit(2);
             });
         let validation = if mask.is_some() {
             if options.threads == 0 || options.limit == Some(0) {
-                Err("Threads and limit must be greater than zero".to_string())
+                Err("Threads and limit must be greater than zero".into())
             } else {
                 Ok(0)
             }
@@ -297,12 +145,37 @@ fn main() {
             options.total()
         };
         if let Err(error) = validation {
-            eprintln!("Invalid generation options: {}", error);
+            presentation::error(&format!("Invalid generation options: {error}"));
             std::process::exit(2);
         }
-        run_generate_attack(&args.zip, args.verbose, &options, mask.as_ref());
+        presentation::heading(
+            if mask.is_some() {
+                "Password mask"
+            } else {
+                "Character search"
+            },
+            path,
+        );
+        if let Some(mask) = args.mask {
+            presentation::note(&format!("Mask  {mask}"));
+        }
+        presentation::note(&format!("Workers  {}", options.threads));
+        run_generate_attack(path, &options, mask.as_ref())
     } else {
-        let dict_path = args.dict.as_deref().unwrap_or("");
-        run_dictionary_attack(&args.zip, dict_path, args.verbose);
+        presentation::heading("Dictionary", path);
+        run_dictionary_attack(
+            path,
+            args.dict.as_deref().ok_or("Choose a recovery method")?,
+            args.verbose,
+        )
+    }
+}
+
+fn main() {
+    let args = Args::parse_cli();
+    presentation::configure(args.color);
+    if let Err(error) = execute(args) {
+        presentation::error(&error.to_string());
+        std::process::exit(1);
     }
 }

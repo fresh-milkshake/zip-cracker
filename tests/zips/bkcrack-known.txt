@@ -1,0 +1,4 @@
+Known plaintext fixture for a local ZipCrypto recovery test.
+This text is intentionally public and is stored without compression.
+The attack receives these bytes and the encrypted ZIP, but no password.
+0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz

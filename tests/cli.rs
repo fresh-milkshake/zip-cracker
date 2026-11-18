@@ -183,3 +183,119 @@ fn bkcrack_rejects_incompatible_modes_and_zero_budgets() {
             .contains("greater than zero"));
     }
 }
+
+#[test]
+fn colors_can_be_forced_or_disabled_for_redirected_output() {
+    for (color, expected) in [("always", true), ("never", false)] {
+        let output = run(&["-g", "--limit", "1", "--color", color]);
+        assert!(output.status.success());
+        assert_eq!(output.stdout.contains(&0x1b), expected);
+        if !expected {
+            assert!(!output.stderr.contains(&0x1b));
+        }
+    }
+}
+
+#[test]
+fn auto_color_respects_no_color() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .args([
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/abcde12.bin"),
+            "-g",
+            "--limit",
+            "1",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!output.stdout.contains(&0x1b));
+    assert!(!output.stderr.contains(&0x1b));
+}
+
+#[test]
+fn dictionary_counts_checked_passwords_and_reports_a_match_only_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let words = directory.path().join("words.txt");
+    std::fs::write(&words, "wrong-one\nwrong-two\nwrong-three\n").unwrap();
+    let output = run(&["-d", words.to_str().unwrap()]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("Checked 3 passwords"));
+    assert!(text.contains("No password found in the wordlist"));
+    std::fs::write(&words, "abcde12\n".repeat(1000)).unwrap();
+    let output = run(&["-d", words.to_str().unwrap()]);
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .matches("Password found: abcde12")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn help_aliases_group_options_and_explain_masks_without_requiring_a_mode() {
+    for flag in ["-h", "--help"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+            .args([flag, "--color", "never"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(!output.stdout.contains(&0x1b));
+        let text = String::from_utf8(output.stdout).unwrap();
+        for section in [
+            "ZIP CRACKER",
+            "Recovery modes",
+            "Automatic recovery",
+            "Candidate search",
+            "Display:",
+            "Examples",
+            "Mask tokens",
+        ] {
+            assert!(text.contains(section), "Missing {section}");
+        }
+        assert!(text.find("Recovery modes").unwrap() < text.find("Display:").unwrap());
+        assert!(text.contains("?a printable ASCII"));
+        assert!(!text.contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"));
+    }
+}
+
+#[test]
+fn help_color_flags_work_before_and_after_help_even_with_no_color() {
+    for arguments in [["-h", "--color", "always"], ["--color", "always", "--help"]] {
+        let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+            .args(arguments)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.contains(&0x1b));
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .args(["--help", "--color=never"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!output.stdout.contains(&0x1b));
+    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .arg("-h")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.stdout.contains(&0x1b));
+}
+
+#[test]
+fn ordinary_cli_requires_a_mode_and_has_no_interactive_switch() {
+    assert_eq!(run(&[]).status.code(), Some(2));
+    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("--color"));
+    assert!(!text.contains("--interactive"));
+}

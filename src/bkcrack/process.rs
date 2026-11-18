@@ -26,6 +26,7 @@ pub fn run(
     log: &Path,
     budget: Duration,
     cancelled: &AtomicBool,
+    label: &'static str,
 ) -> io::Result<Completion> {
     let output = File::create(log)?;
     command
@@ -38,6 +39,7 @@ pub fn run(
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
     let mut child = RunningChild(command.spawn()?);
+    let activity = crate::presentation::activity(label);
     let started = Instant::now();
     let mut last_update = Instant::now();
     loop {
@@ -59,22 +61,46 @@ pub fn run(
                 timed_out: true,
             });
         }
-        if last_update.elapsed() >= Duration::from_secs(5) {
+        let interval = if activity.0.is_hidden() {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_millis(250)
+        };
+        if last_update.elapsed() >= interval {
             let tail = log_tail(log).unwrap_or_default();
-            let progress = tail
-                .split(['\r', '\n'])
-                .rev()
-                .find(|line| line.contains(" % ("))
-                .unwrap_or("")
-                .replace("\x1b[1K", "");
-            println!(
-                "  {:.0}s elapsed {progress}",
-                started.elapsed().as_secs_f64()
-            );
+            if let Some((current, total)) = latest_progress(&tail) {
+                if activity.0.length().is_none() {
+                    activity.0.set_style(crate::presentation::progress_style());
+                }
+                activity.0.set_length(total);
+                activity.0.set_position(current);
+                if activity.0.is_hidden() {
+                    crate::presentation::detail(format!(
+                        "{label} · {current}/{total} · {:.0}s elapsed",
+                        started.elapsed().as_secs_f64()
+                    ));
+                }
+            } else {
+                activity.0.tick();
+            }
             last_update = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn latest_progress(log: &str) -> Option<(u64, u64)> {
+    log.split(['\r', '\n']).rev().find_map(|line| {
+        if !line.contains('%') {
+            return None;
+        }
+        let (_, fraction) = line.rsplit_once('(')?;
+        let (current, rest) = fraction.split_once('/')?;
+        let total = rest.split_once(')')?.0;
+        let current = current.trim().parse().ok()?;
+        let total = total.trim().parse().ok()?;
+        (total > 0 && current <= total).then_some((current, total))
+    })
 }
 
 pub fn log_tail(path: &Path) -> io::Result<String> {
@@ -170,9 +196,20 @@ mod tests {
             &directory.path().join("log.txt"),
             Duration::from_millis(100),
             &AtomicBool::new(false),
+            "Test process",
         )
         .unwrap();
         assert!(result.timed_out && !result.success);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn progress_uses_latest_valid_fraction_across_phase_resets() {
+        assert_eq!(
+            latest_progress("100 % (100 / 100)\r0.5 % (5 / 1000)\x1b[1K"),
+            Some((5, 1000))
+        );
+        assert_eq!(latest_progress("broken % (900 / 10)\rtext"), None);
+        assert_eq!(latest_progress("0 % (0 / 0)"), None);
     }
 }

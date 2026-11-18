@@ -46,13 +46,12 @@ pub fn run(path: &Path, options: &Options) -> Result<(), Box<dyn std::error::Err
             "No applicable automatic bkcrack guesses; no password search was performed".into(),
         );
     }
-    println!("Automatic plaintext candidates: {}", attacks.len());
+    crate::presentation::section(format!("Automatic plaintext candidates: {}", attacks.len()));
     for (number, attack) in attacks.iter().enumerate() {
-        println!(
-            "  {}. {:?}: {} ({} contiguous bytes, {} additional bytes; {})",
-            number + 1,
-            attack.name,
-            attack.guess.description,
+        crate::presentation::section(format!("{}. {:?}", number + 1, attack.name));
+        crate::presentation::detail(&attack.guess.description);
+        crate::presentation::detail(format!(
+            "{} contiguous bytes + {} additional bytes · {}",
             attack.guess.bytes.len(),
             attack
                 .guess
@@ -65,9 +64,10 @@ pub fn run(path: &Path, options: &Options) -> Result<(), Box<dyn std::error::Err
             } else {
                 "format assumption, not yet verified"
             }
-        );
+        ));
     }
     if options.dry_run {
+        crate::presentation::detail("Preview only. No attack was started.");
         return Ok(());
     }
     let executable = process::locate(options.executable.as_deref())?;
@@ -99,14 +99,13 @@ pub fn run(path: &Path, options: &Options) -> Result<(), Box<dyn std::error::Err
         } else {
             remaining.min(Duration::from_secs(options.attempt_seconds))
         };
-        println!(
-            "Trying {}/{}: {:?}, {} (up to {:.0}s)",
+        crate::presentation::section(format!(
+            "Trying {}/{}: {:?}",
             number + 1,
             attacks.len(),
             attack.name,
-            attack.guess.description,
-            budget.as_secs_f64()
-        );
+        ));
+        crate::presentation::detail(format!("Time budget: {:.0}s", budget.as_secs_f64()));
         let plain = temporary.path().join("plaintext.bin");
         std::fs::write(&plain, &attack.guess.bytes)?;
         let log = temporary.path().join("attack.log");
@@ -127,20 +126,20 @@ pub fn run(path: &Path, options: &Options) -> Result<(), Box<dyn std::error::Err
                 .collect::<String>();
             command.arg("-x").arg(offset.to_string()).arg(hex);
         }
-        let completion = process::run(&mut command, &log, budget, &cancelled)?;
+        let completion = process::run(&mut command, &log, budget, &cancelled, "Recover keys")?;
         let log_text = std::fs::read_to_string(&log)?;
         if options.verbose {
             println!("{}", process::log_tail(&log)?);
         }
         if completion.timed_out {
-            println!("  Time budget reached for this assumption");
+            crate::presentation::warning("Time budget reached for this assumption");
             continue;
         }
         let Some(keys) = process::parse_keys(&log_text).filter(|_| completion.success) else {
             if !completion.success && !log_text.contains("Could not find the keys") {
                 return Err(format!("bkcrack failed: {}", process::log_tail(&log)?).into());
             }
-            println!("  Assumption did not recover keys");
+            crate::presentation::detail("Assumption did not recover keys");
             continue;
         };
         // Write to a temporary file on the destination filesystem, then publish without overwriting.
@@ -161,17 +160,23 @@ pub fn run(path: &Path, options: &Options) -> Result<(), Box<dyn std::error::Err
         if remaining.is_zero() {
             return Err("Keys recovered, but total time budget expired before decryption".into());
         }
-        let completion = process::run(&mut decrypt, &log, remaining, &cancelled)?;
+        let completion =
+            process::run(&mut decrypt, &log, remaining, &cancelled, "Decrypt archive")?;
         if !completion.success {
             return Err(format!("Decryption failed: {}", process::log_tail(&log)?).into());
         }
         if let Err(error) = verified_archive(destination.path()) {
-            println!("  Recovered keys failed full archive verification: {error}");
+            crate::presentation::warning(format!(
+                "Recovered keys failed full archive verification: {error}"
+            ));
             continue;
         }
         destination.persist_noclobber(&output)?;
-        println!("Recovered keys: {} {} {}", keys[0], keys[1], keys[2]);
-        println!("Decrypted and verified: {}", output.display());
+        crate::presentation::detail(format!(
+            "Recovered keys: {} {} {}",
+            keys[0], keys[1], keys[2]
+        ));
+        crate::presentation::success("Decrypted and verified:", output.display());
         println!(
             "Completed in {:.3}s without password candidates",
             started.elapsed().as_secs_f64()

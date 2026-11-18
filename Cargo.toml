@@ -21,7 +21,9 @@ num_cpus = "1.14.0"
 crc32fast = "1.3"
 tempfile = "3"
 ctrlc = "3"
+console = "0.15"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
+strip = true

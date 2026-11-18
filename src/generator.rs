@@ -1,6 +1,6 @@
 use crate::functions::is_right_password;
 use crate::zipcrypto::HeaderFilter;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -194,10 +194,7 @@ pub fn generate_attack(
     // One archive-sized allocation avoids disk seeks for each password, regardless of search size.
     let bytes: Arc<[u8]> = std::fs::read(zip_path)?.into();
     let archive = ZipArchive::new(Cursor::new(bytes))?;
-    let progress = ProgressBar::new(total);
-    progress.set_style(ProgressStyle::with_template(
-        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {per_sec} {eta} {msg}",
-    )?);
+    let progress = crate::presentation::progress(total, "Character search");
     let mut checked = 0;
     let mut password = None;
     for length in options.min_length..=options.max_length {

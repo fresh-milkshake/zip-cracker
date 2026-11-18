@@ -14,8 +14,8 @@ Zip Cracker is a ~~powerful~~, modern, and ~~efficient~~ tool for cracking passw
 
 - Multithreaded password cracking for maximum performance
 - Dictionary-based attack using custom wordlists
-- Brute-force attack with adjustable character sets and lengths
-- Progress bar for real-time updates on cracking progress
+- Bounded parallel generation with adjustable character sets, lengths and masks
+- Automatic plaintext assumptions for ZipCrypto recovery through bkcrack
 
 ## Installation
 
@@ -39,39 +39,69 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fresh-milkshake/zip-cr
 
 ## Usage
 
-Zip Cracker provides an easy-to-use command-line interface for cracking password-protected ZIP files. Here's a quick overview of how to use the tool:
+### Password generation and masks
 
-1. Dictionary-based attack:
+```bash
+zip-cracker archive.zip -g --min-length 1 --max-length 6
+zip-cracker archive.zip -g --mask '?l?l?l?d?d'
+zip-cracker archive.zip -g --min-length 7 --max-length 7 --limit 10000000
+```
 
-    ```bash
-    zip-cracker /path/to/encrypted.zip -d /path/to/dictionary.txt
-    ```
+Masks use `?l` for lowercase letters, `?u` for uppercase, `?d` for digits,
+`?s` for symbols, `?a` for printable ASCII and `??` for a literal question mark.
+Use a mask only when you know the password's structure. `--charset` and `--threads`
+configure ordinary generation; `--limit` caps the number of checked candidates.
+Defaults are lengths 1–8 and characters `a-zA-Z0-9`. Larger searches can take years.
 
-2. Brute-force attack:
+Live progress and the verified result of one bounded test search:
 
-    ```bash
-    zip-cracker /path/to/encrypted.zip -g
-    ```
+![Mask search with a verified result, checked count and speed](assets/screenshots/mask-search.png)
 
-3. Display help:
+### Automatic ZipCrypto recovery
 
-    ```bash
-    $ zip-cracker --help
-    
-    Zip Bruteforce
-    
-    USAGE:
-        main.exe [OPTIONS] <FILE>
-    
-    ARGS:
-        <FILE>    The zip file to bruteforce
-    
-    OPTIONS:
-        -d, --dict <FILE>    Path to the dictionary to use for bruteforce
-        -g, --generate       Use brute-force generation
-        -h, --help           Print help information
-        -v, --verbose        Prints more information
-    ```
+```bash
+zip-cracker archive.zip --bkcrack --dry-run
+zip-cracker archive.zip --bkcrack --decrypt unlocked.zip
+```
+
+This mode checks matching open copies beside the archive and inside it, then tries
+known structures of PNG, WAV/RIFF, BMP, PDF and JPEG files. The current automatic
+templates support ZipCrypto entries stored without ZIP compression. Assumptions
+may not match a particular file; successful output is checked before publication.
+
+![Automatic discovery of known content, key recovery progress and verified output](assets/screenshots/automatic-preview.png)
+
+Install [bkcrack](https://github.com/kimci86/bkcrack) beside the executable, put it
+on `PATH`, or pass `--bkcrack-path`. The default time budget is 180 seconds;
+`--bkcrack-seconds` changes it. Existing output files are never overwritten.
+
+### Dictionary search
+
+```bash
+zip-cracker archive.zip -d words.txt
+```
+
+Use one password per line. Progress counts passwords actually checked by workers,
+not candidates waiting in the queue.
+
+### Output
+
+Important results are green, mode and phase headings use accent colors, errors
+are red, and paths and supporting details are dimmed. Generation and dictionary
+search show checked counts, speed and ETA. The bkcrack mode displays its current
+phase progress. Terminal rendering is limited to five updates per second, with
+candidate counters updated in batches.
+
+Colors are automatic and respect `NO_COLOR` and redirected output. Override them
+with `--color always` or `--color never`; dynamic progress bars stay hidden in
+redirected streams. Run `zip-cracker --help` for all options.
+
+Screenshots combine intermediate progress and final results from real runs with
+[Freeze](https://github.com/charmbracelet/freeze). After a release build, run
+`pwsh ./scripts/screenshots.ps1` with Freeze installed at `target/freeze/freeze.exe`,
+or supply its location through `-FreezePath`. The recovery example also needs
+bkcrack at `target/bkcrack-1.8.1/bkcrack.exe`, or a location supplied through
+`-BkcrackPath`.
 
 ## Building from Source
 

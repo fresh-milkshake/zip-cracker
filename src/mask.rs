@@ -1,7 +1,6 @@
 use crate::functions::is_right_password;
 use crate::generator::{GenerationResult, MAX_PASSWORD_LENGTH};
 use crate::zipcrypto::HeaderFilter;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -92,10 +91,7 @@ pub fn generate_mask_attack(
         .ok()
         .and_then(|entry| HeaderFilter::from_entry(&bytes, &entry));
     let total = limit.unwrap_or(mask.count).min(mask.count);
-    let progress = ProgressBar::new(total);
-    progress.set_style(ProgressStyle::with_template(
-        "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {per_sec} {eta} Mask",
-    )?);
+    let progress = crate::presentation::progress(total, "Mask search");
     let next = AtomicU64::new(0);
     let checked = AtomicU64::new(0);
     let found = AtomicBool::new(false);
