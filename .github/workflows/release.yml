@@ -96,7 +96,7 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Build
-      run: cargo build --release
+      run: cargo build --locked --release
 
   build:
     name: Build
@@ -139,7 +139,7 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Build release
-      run: cargo build --release --target ${{ matrix.target }}
+      run: cargo build --locked --release --target ${{ matrix.target }}
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
