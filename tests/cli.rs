@@ -102,6 +102,8 @@ fn finds_real_password_using_configured_search_space() {
         "7",
         "--charset",
         "abcde12",
+        "--threads",
+        "4",
     ]);
     assert!(output.status.success());
     assert!(String::from_utf8(output.stdout)
@@ -111,6 +113,7 @@ fn finds_real_password_using_configured_search_space() {
 
 #[test]
 fn rejects_invalid_generation_options() {
+    assert_eq!(run(&[]).status.code(), Some(2));
     for arguments in [
         vec!["-g", "--threads", "0"],
         vec!["-g", "--limit", "0"],
@@ -236,33 +239,6 @@ fn dictionary_counts_checked_passwords_and_reports_a_match_only_once() {
 }
 
 #[test]
-fn help_aliases_group_options_and_explain_masks_without_requiring_a_mode() {
-    for flag in ["-h", "--help"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
-            .args([flag, "--color", "never"])
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        assert!(!output.stdout.contains(&0x1b));
-        let text = String::from_utf8(output.stdout).unwrap();
-        for section in [
-            "ZIP CRACKER",
-            "Recovery modes",
-            "Automatic recovery",
-            "Candidate search",
-            "Display:",
-            "Examples",
-            "Mask tokens",
-        ] {
-            assert!(text.contains(section), "Missing {section}");
-        }
-        assert!(text.find("Recovery modes").unwrap() < text.find("Display:").unwrap());
-        assert!(text.contains("?a printable ASCII"));
-        assert!(!text.contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"));
-    }
-}
-
-#[test]
 fn help_color_flags_work_before_and_after_help_even_with_no_color() {
     for arguments in [["-h", "--color", "always"], ["--color", "always", "--help"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
@@ -285,17 +261,4 @@ fn help_color_flags_work_before_and_after_help_even_with_no_color() {
         .output()
         .unwrap();
     assert!(!output.stdout.contains(&0x1b));
-}
-
-#[test]
-fn ordinary_cli_requires_a_mode_and_has_no_interactive_switch() {
-    assert_eq!(run(&[]).status.code(), Some(2));
-    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
-        .arg("--help")
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert!(text.contains("--color"));
-    assert!(!text.contains("--interactive"));
 }

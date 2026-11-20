@@ -43,16 +43,6 @@ impl PreparedFilter {
         }
         self.header.check_batch(keys)
     }
-
-    #[inline]
-    #[cfg(test)]
-    pub fn may_match(&self, prefix_index: u64, password: &[u8]) -> bool {
-        let mut keys = self.prefixes[prefix_index as usize];
-        for &byte in &password[self.prefix_length..] {
-            keys.update(byte);
-        }
-        self.header.check_keys(keys)
-    }
 }
 
 impl HeaderFilter {
@@ -103,7 +93,7 @@ impl HeaderFilter {
             prefix_length,
         }
     }
-    pub fn from_entry(bytes: &[u8], entry: &ZipFile<'_>) -> Option<Self> {
+    pub fn from_entry<R: std::io::Read>(bytes: &[u8], entry: &ZipFile<'_, R>) -> Option<Self> {
         let central = usize::try_from(entry.central_header_start()).ok()?;
         let header = bytes.get(central..central.checked_add(46)?)?;
         if &header[..4] != b"PK\x01\x02" {
@@ -135,18 +125,7 @@ impl HeaderFilter {
         for &byte in password {
             keys.update(byte);
         }
-        self.check_keys(keys)
-    }
-
-    #[inline]
-    #[cfg(test)]
-    fn check_keys(&self, mut keys: Keys) -> bool {
-        // Only the last header byte is checked; the first eleven evolve the keys.
-        for &byte in &self.encrypted[..11] {
-            let plain = byte ^ keys.stream_byte();
-            keys.update(plain);
-        }
-        self.encrypted[11] ^ keys.stream_byte() == self.expected
+        self.check_batch([keys; 4])[0]
     }
 }
 
@@ -209,7 +188,7 @@ const CRC_TABLE: [u32; 256] = {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::functions::is_right_password;
+    use crate::archive::is_right_password;
     use std::io::{Cursor, Read};
     use zip::ZipArchive;
 
@@ -226,8 +205,7 @@ mod tests {
             let mut header_matches = 0;
             for index in 0..10_000 {
                 let password = format!("wrong{index}");
-                let expected =
-                    matches!(archive.by_index_decrypt(0, password.as_bytes()), Ok(Ok(_)));
+                let expected = archive.by_index_decrypt(0, password.as_bytes()).is_ok();
                 assert_eq!(filter.may_match(password.as_bytes()), expected);
                 if expected {
                     header_matches += 1;
@@ -274,16 +252,8 @@ mod tests {
                     prepared.match_batch(start % prepared.prefix_count(), &passwords, length);
                 for lane in 0..4 {
                     let password = &passwords[lane][..length];
-                    assert_eq!(
-                        batch[lane],
-                        prepared
-                            .may_match((start + lane as u64) % prepared.prefix_count(), password)
-                    );
                     assert_eq!(batch[lane], header.may_match(password));
-                    assert_eq!(
-                        batch[lane],
-                        matches!(archive.by_index_decrypt(0, password), Ok(Ok(_)))
-                    );
+                    assert_eq!(batch[lane], archive.by_index_decrypt(0, password).is_ok());
                 }
             }
         }
@@ -305,7 +275,6 @@ mod tests {
         let mut plaintext = Vec::new();
         archive
             .by_index_decrypt(0, b"abcde12")
-            .unwrap()
             .unwrap()
             .read_to_end(&mut plaintext)
             .unwrap();
@@ -338,7 +307,7 @@ mod tests {
             let password = format!("wrong{index}");
             assert_eq!(
                 filter.may_match(password.as_bytes()),
-                matches!(archive.by_index_decrypt(0, password.as_bytes()), Ok(Ok(_)))
+                archive.by_index_decrypt(0, password.as_bytes()).is_ok()
             );
         }
     }

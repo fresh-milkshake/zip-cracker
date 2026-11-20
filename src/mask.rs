@@ -1,4 +1,4 @@
-use crate::functions::is_right_password;
+use crate::archive::is_right_password;
 use crate::generator::{GenerationResult, MAX_PASSWORD_LENGTH};
 use crate::zipcrypto::HeaderFilter;
 use std::io::Cursor;

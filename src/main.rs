@@ -1,6 +1,7 @@
+mod archive;
 mod bkcrack;
 mod cli;
-mod functions;
+mod dictionary;
 mod generator;
 mod mask;
 mod presentation;
@@ -8,81 +9,18 @@ mod presentation;
 mod zipcrypto;
 
 use cli::Args;
-use crossbeam_channel::bounded;
-use functions::{dictionary_attack, send_passwords};
 use generator::{generate_attack, GenerationOptions};
 use mask::{generate_mask_attack, Mask};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::time::Instant;
-
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use zip::{result::ZipError, ZipArchive};
 
 type AppResult = Result<(), Box<dyn std::error::Error>>;
-
-fn check_archive(path: &str) -> AppResult {
-    let mut archive = ZipArchive::new(File::open(path)?)?;
-    let result = match archive.by_index(0) {
-        Err(ZipError::UnsupportedArchive("Password required to decrypt file")) => Ok(()),
-        Ok(_) => Err("The zip file is not encrypted".into()),
-        Err(error) => Err(error.into()),
-    };
-    result
-}
-
-fn run_dictionary_attack(zip_path: &str, dict_path: &str, verbose: bool) -> AppResult {
-    check_archive(zip_path)?;
-    let started = Instant::now();
-    let lines = BufReader::new(File::open(dict_path)?)
-        .lines()
-        .collect::<Result<Vec<_>, _>>()?;
-    let progress = presentation::progress(lines.len() as u64, "Dictionary");
-    presentation::detail(format!(
-        "Wordlist  {dict_path} · {} candidates",
-        lines.len()
-    ));
-    let found = Arc::new(AtomicBool::new(false));
-    let (send_password, receive_password) = bounded(100_000);
-    let (send_found, receive_found) = bounded(1);
-    let mut workers = Vec::new();
-    for index in 0..num_cpus::get_physical().max(1) {
-        if verbose {
-            presentation::note(&format!("Starting worker {index}"));
-        }
-        workers.push(dictionary_attack(
-            index,
-            zip_path,
-            found.clone(),
-            receive_password.clone(),
-            send_found.clone(),
-            progress.clone(),
-        ));
-    }
-    drop(receive_password);
-    drop(send_found);
-    let sender = send_passwords(found, send_password, lines);
-    sender.join().map_err(|_| "Wordlist reader failed")?;
-    for worker in workers {
-        worker.join().map_err(|_| "Dictionary worker failed")?;
-    }
-    progress.finish_and_clear();
-    if let Ok(password) = receive_found.try_recv() {
-        presentation::success("Password found:", password);
-    } else {
-        presentation::note("No password found in the wordlist");
-    }
-    presentation::statistics(progress.position(), started.elapsed());
-    Ok(())
-}
 
 fn run_generate_attack(
     zip_path: &str,
     options: &GenerationOptions,
     mask: Option<&Mask>,
 ) -> AppResult {
-    check_archive(zip_path)?;
+    archive::check_encrypted(zip_path)?;
     let cancelled = AtomicBool::new(false);
     let result = if let Some(mask) = mask {
         generate_mask_attack(zip_path, mask, options.threads, options.limit, &cancelled)?
@@ -163,7 +101,7 @@ fn execute(args: Args) -> AppResult {
         run_generate_attack(path, &options, mask.as_ref())
     } else {
         presentation::heading("Dictionary", path);
-        run_dictionary_attack(
+        dictionary::run(
             path,
             args.dict.as_deref().ok_or("Choose a recovery method")?,
             args.verbose,

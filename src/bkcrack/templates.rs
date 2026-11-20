@@ -171,7 +171,6 @@ mod tests {
         archive
             .by_index_decrypt(0, b"Unrelated-Test-Password!47")
             .unwrap()
-            .unwrap()
             .read_to_end(&mut plaintext)
             .unwrap();
         let guess = for_entry("image.png", plaintext.len() as u64).remove(0);

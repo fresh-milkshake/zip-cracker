@@ -46,7 +46,7 @@ fn entry_metadata(
         entries.push(Entry {
             index,
             name: entry.name().into(),
-            relative: entry.enclosed_name().map(Path::to_path_buf),
+            relative: entry.enclosed_name(),
             size: entry.size(),
             crc: entry.crc32(),
             encrypted: flags & 1 != 0,
@@ -190,7 +190,6 @@ mod tests {
         archive
             .by_index_decrypt(0, b"abcde12")
             .unwrap()
-            .unwrap()
             .read_to_end(&mut bytes)
             .unwrap();
         std::fs::write(directory.path().join("payload.txt"), bytes).unwrap();
@@ -209,7 +208,6 @@ mod tests {
         source
             .by_index_decrypt(0, b"abcde12")
             .unwrap()
-            .unwrap()
             .read_to_end(&mut bytes)
             .unwrap();
         drop(source);
@@ -220,7 +218,7 @@ mod tests {
             .unwrap();
         let mut writer = zip::ZipWriter::new_append(file).unwrap();
         writer
-            .start_file("public-copy.txt", zip::write::FileOptions::default())
+            .start_file("public-copy.txt", zip::write::SimpleFileOptions::default())
             .unwrap();
         writer.write_all(&bytes).unwrap();
         writer.finish().unwrap();

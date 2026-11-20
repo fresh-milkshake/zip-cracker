@@ -5,16 +5,12 @@ edition = "2021"
 default-run = "zip-cracker"
 
 [[bin]]
-name = "experiments"
-path = "src/concurrent_experiments.rs"
-
-[[bin]]
 name = "zip-cracker"
 path = "src/main.rs"
 
 [dependencies]
 crossbeam-channel = "0.5.6"
-zip = "0.6.3"
+zip = { version = "2.6.1", default-features = false, features = ["aes-crypto", "bzip2", "deflate", "time", "zstd"] }
 clap = { version = "4.0", features = ["derive"] }
 indicatif = "0.17.3"
 num_cpus = "1.14.0"

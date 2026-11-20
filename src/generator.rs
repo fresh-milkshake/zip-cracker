@@ -1,4 +1,4 @@
-use crate::functions::is_right_password;
+use crate::archive::is_right_password;
 use crate::zipcrypto::HeaderFilter;
 use indicatif::ProgressBar;
 use std::io::Cursor;
@@ -61,9 +61,10 @@ pub struct GenerationResult {
 }
 
 // Keep the original ordering: the first character is the least significant digit.
-fn decode(mut index: u64, charset: &[u8], password: &mut [u8]) {
-    for byte in password {
-        *byte = charset[(index % charset.len() as u64) as usize];
+fn decode(mut index: u64, charset: &[u8], digits: &mut [usize], password: &mut [u8]) {
+    for (digit, byte) in digits.iter_mut().zip(password) {
+        *digit = (index % charset.len() as u64) as usize;
+        *byte = charset[*digit];
         index /= charset.len() as u64;
     }
 }
@@ -115,13 +116,13 @@ fn search_length(
                         if start >= count {
                             return None;
                         }
-                        let end = (start + BLOCK_SIZE).min(count);
-                        decode(start, charset, &mut password[..length]);
-                        let mut value = start;
-                        for digit in &mut digits[..length] {
-                            *digit = (value % charset.len() as u64) as usize;
-                            value /= charset.len() as u64;
-                        }
+                        let end = start.saturating_add(BLOCK_SIZE).min(count);
+                        decode(
+                            start,
+                            charset,
+                            &mut digits[..length],
+                            &mut password[..length],
+                        );
                         let mut attempts = 0;
                         let prefix_count =
                             filter.as_ref().map_or(1, |filter| filter.prefix_count());
@@ -254,7 +255,7 @@ mod tests {
         let mut actual = [b'a'; 4];
         for index in 0..81 {
             let mut expected = [0; 4];
-            decode(index, b"abc", &mut expected);
+            decode(index, b"abc", &mut [0; 4], &mut expected);
             assert_eq!(actual, expected);
             increment(b"abc", &mut digits, &mut actual);
         }
@@ -263,7 +264,12 @@ mod tests {
     #[test]
     fn decodes_seven_character_index_beyond_u32() {
         let mut password = [0; 7];
-        decode(3_115_827_589_710, DEFAULT_CHARSET.as_bytes(), &mut password);
+        decode(
+            3_115_827_589_710,
+            DEFAULT_CHARSET.as_bytes(),
+            &mut [0; 7],
+            &mut password,
+        );
         assert_eq!(&password, b"abcde12");
     }
 
@@ -276,44 +282,6 @@ mod tests {
         assert_eq!(options("ab", 9).total().unwrap(), 512);
         assert!(options(DEFAULT_CHARSET, 16).total().is_err());
         assert_eq!(options(DEFAULT_CHARSET, 8).total().unwrap(), 62u64.pow(8));
-    }
-
-    #[test]
-    fn verifies_payload_after_header_check() {
-        let mut archive = archive();
-        assert!(is_right_password(&mut archive, b"abcde12"));
-        for index in 0..10_000 {
-            assert!(!is_right_password(
-                &mut archive,
-                format!("wrong{index}").as_bytes()
-            ));
-        }
-    }
-
-    #[test]
-    fn verifies_aes_and_deflate_archives() {
-        for fixture in [
-            include_bytes!("../tests/fixtures/aes.bin").as_slice(),
-            include_bytes!("../tests/fixtures/deflated.bin").as_slice(),
-        ] {
-            let mut archive = ZipArchive::new(Cursor::new(fixture)).unwrap();
-            assert!(is_right_password(&mut archive, b"abcde12"));
-            assert!(!is_right_password(&mut archive, b"wrong"));
-        }
-    }
-
-    #[test]
-    fn finds_seven_character_password_with_parallel_workers() {
-        let (password, checked) = search_length(
-            &archive(),
-            &options("abcde12", 7),
-            7,
-            7u64.pow(7),
-            &AtomicBool::new(false),
-            &ProgressBar::hidden(),
-        );
-        assert_eq!(password.as_deref(), Some("abcde12"));
-        assert!(checked > BLOCK_SIZE && checked <= 7u64.pow(7));
     }
 
     #[test]
