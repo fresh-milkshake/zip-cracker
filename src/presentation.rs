@@ -72,6 +72,18 @@ pub fn progress(total: u64, label: &'static str) -> ProgressBar {
     progress
 }
 
+pub fn streaming_progress(label: &'static str) -> ProgressBar {
+    let progress = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr_with_hz(5));
+    progress.set_style(
+        ProgressStyle::with_template(
+            "  {spinner:.magenta} {msg} · {pos} checked · {per_sec} · {elapsed_precise}",
+        )
+        .expect("Static streaming progress template"),
+    );
+    progress.set_message(label);
+    progress
+}
+
 pub fn progress_style() -> ProgressStyle {
     ProgressStyle::with_template(
         "  {spinner:.magenta} {msg:<14} [{bar:22.magenta/black}] {percent:>3}%\n    {counts} checked · {rate:.cyan} · ETA {eta}",

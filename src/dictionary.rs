@@ -1,101 +1,130 @@
+mod producer;
+
 use crate::archive::is_right_password;
-use crate::presentation;
-use crate::AppResult;
-use crossbeam_channel::{bounded, Receiver, Sender};
-use indicatif::ProgressBar;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use crate::wordlists::Library;
+use crate::zipcrypto::HeaderFilter;
+use crate::{presentation, AppResult};
+use crossbeam_channel::bounded;
+use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 use std::time::Instant;
 use zip::ZipArchive;
 
-pub fn run(zip_path: &str, dict_path: &str, verbose: bool) -> AppResult {
-    crate::archive::check_encrypted(zip_path)?;
-    let started = Instant::now();
-    let lines = BufReader::new(File::open(dict_path)?)
-        .lines()
-        .collect::<Result<Vec<_>, _>>()?;
-    let progress = presentation::progress(lines.len() as u64, "Dictionary");
-    presentation::detail(format!(
-        "Wordlist  {dict_path} · {} candidates",
-        lines.len()
-    ));
-    let found = Arc::new(AtomicBool::new(false));
-    let (send_password, receive_password) = bounded(100_000);
-    let (send_found, receive_found) = bounded(1);
-    let mut workers = Vec::new();
-    for index in 0..num_cpus::get_physical().max(1) {
-        if verbose {
-            presentation::note(&format!("Starting worker {index}"));
-        }
-        workers.push(spawn_worker(
-            index,
-            zip_path,
-            found.clone(),
-            receive_password.clone(),
-            send_found.clone(),
-            progress.clone(),
-        ));
-    }
-    drop(receive_password);
-    drop(send_found);
-    for password in lines {
-        if found.load(Ordering::Relaxed) || send_password.send(password).is_err() {
-            break;
+struct WorkerGuard<'a>(&'a AtomicBool);
+
+impl Drop for WorkerGuard<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.store(true, Ordering::Relaxed);
         }
     }
-    drop(send_password);
-    for worker in workers {
-        worker.join().map_err(|_| "Dictionary worker failed")?;
-    }
-    progress.finish_and_clear();
-    if let Ok(password) = receive_found.try_recv() {
-        presentation::success("Password found:", password);
-    } else {
-        presentation::note("No password found in the wordlist");
-    }
-    presentation::statistics(progress.position(), started.elapsed());
-    Ok(())
 }
 
-fn spawn_worker(
-    index: usize,
-    zip_path: &str,
-    is_password_found: Arc<AtomicBool>,
-    receive_password: Receiver<String>,
-    send_found: Sender<String>,
-    progress: ProgressBar,
-) -> JoinHandle<()> {
-    let mut zip_archive = ZipArchive::new(File::open(zip_path).expect("Failed to open zip file"))
-        .expect("Failed to create ZipArchive");
-    let builder = thread::Builder::new().name(format!("thread-{}", index));
+pub struct Options {
+    pub threads: usize,
+    pub limit: Option<u64>,
+    pub refresh: bool,
+    pub rules: bool,
+    pub keep_duplicates: bool,
+    pub min_length: usize,
+    pub max_length: usize,
+}
 
-    builder
-        .spawn(move || {
-            let mut pending = 0;
-            while !is_password_found.load(Ordering::Relaxed) {
-                if let Ok(password) = receive_password.recv() {
-                    pending += 1;
-                    if is_right_password(&mut zip_archive, password.as_bytes()) {
-                        if is_password_found
-                            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-                            .is_ok()
-                        {
-                            let _ = send_found.send(password);
+pub fn run(zip_path: &str, sources: &[String], library: &Library, options: &Options) -> AppResult {
+    if options.threads == 0 || options.limit == Some(0) || options.min_length > options.max_length {
+        return Err(
+            "Threads/limit must be positive and minimum word length must not exceed maximum".into(),
+        );
+    }
+    crate::archive::check_encrypted(zip_path)?;
+    let started = Instant::now();
+    let bytes: Arc<[u8]> = std::fs::read(zip_path)?.into();
+    let mut archive = ZipArchive::new(Cursor::new(bytes.clone()))?;
+    let filter = archive
+        .by_index_raw(0)
+        .ok()
+        .and_then(|entry| HeaderFilter::from_entry(&bytes, &entry));
+    let progress = presentation::streaming_progress("Dictionary");
+    let found = AtomicBool::new(false);
+    // Batches cap both candidate count and bytes; memory is independent of dictionary size.
+    let (sender, receiver) = bounded::<Vec<Vec<u8>>>(8);
+    let result = std::thread::scope(|scope| -> AppResult<(Option<Vec<u8>>, u64)> {
+        let mut workers = Vec::new();
+        for _ in 0..options.threads {
+            let receiver = receiver.clone();
+            let mut archive = archive.clone();
+            let found = &found;
+            let progress = &progress;
+            workers.push(scope.spawn(move || {
+                let _guard = WorkerGuard(found);
+                while let Ok(batch) = receiver.recv() {
+                    let mut checked = 0;
+                    let mut result = None;
+                    for password in batch {
+                        if found.load(Ordering::Relaxed) || library.is_cancelled() {
+                            break;
                         }
-                        break;
+                        checked += 1;
+                        if filter
+                            .as_ref()
+                            .is_none_or(|header| header.may_match(&password))
+                            && is_right_password(&mut archive, &password)
+                        {
+                            if found
+                                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+                                .is_ok()
+                            {
+                                result = Some(password);
+                            }
+                            break;
+                        }
                     }
-                    if pending == 256 {
-                        progress.inc(pending);
-                        pending = 0;
+                    progress.inc(checked);
+                    if found.load(Ordering::Relaxed) || library.is_cancelled() {
+                        return result;
                     }
-                } else {
-                    break;
                 }
-            }
-            progress.inc(pending);
-        })
-        .expect("Failed to spawn thread")
+                None
+            }));
+        }
+        drop(receiver);
+        let produced = producer::send(sources, library, options, &found, &sender, &progress);
+        drop(sender);
+        // Stop promptly on read/download errors, but join all workers before returning.
+        if produced.is_err() {
+            found.store(true, Ordering::Relaxed);
+        }
+        let mut password = None;
+        for worker in workers {
+            password = password.or(worker.join().map_err(|_| "Dictionary worker panicked")?);
+        }
+        Ok((password, produced?))
+    });
+    progress.finish_and_clear();
+    presentation::statistics(progress.position(), started.elapsed());
+    let (password, skipped) = result?;
+    if let Some(password) = password {
+        let display = match String::from_utf8(password) {
+            Ok(password) => password,
+            Err(error) => format!(
+                "$HEX[{}]",
+                error
+                    .as_bytes()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
+        };
+        presentation::success("Password found:", display);
+        presentation::detail("Full entry verification passed.");
+    } else if library.is_cancelled() {
+        return Err("Dictionary search cancelled".into());
+    } else {
+        presentation::note("No password found in the wordlist sources");
+    }
+    if skipped > 0 {
+        presentation::detail(format!("Skipped {skipped} repeated/filtered candidates"));
+    }
+    Ok(())
 }

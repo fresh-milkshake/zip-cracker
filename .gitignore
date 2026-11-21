@@ -3,3 +3,4 @@
 /dictionaries
 *.exe
 .gitignore
+/scripts/screenshots.ps1

@@ -5,6 +5,7 @@ mod dictionary;
 mod generator;
 mod mask;
 mod presentation;
+mod wordlists;
 
 mod zipcrypto;
 
@@ -13,7 +14,7 @@ use generator::{generate_attack, GenerationOptions};
 use mask::{generate_mask_attack, Mask};
 use std::sync::atomic::AtomicBool;
 
-type AppResult = Result<(), Box<dyn std::error::Error>>;
+type AppResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 fn run_generate_attack(
     zip_path: &str,
@@ -42,7 +43,12 @@ fn run_generate_attack(
 }
 
 fn execute(args: Args) -> AppResult {
-    let path = args.zip.as_str();
+    if let Some(cli::Command::Wordlists { action }) = args.command {
+        let library = wordlists::Library::new(args.wordlist_dir.as_deref(), args.offline)?;
+        library.handle_interrupts()?;
+        return library.execute(action);
+    }
+    let path = args.zip.as_deref().ok_or("Choose a ZIP archive")?;
     if args.bkcrack {
         presentation::heading("Automatic recovery", path);
         let options = bkcrack::Options {
@@ -101,11 +107,29 @@ fn execute(args: Args) -> AppResult {
         run_generate_attack(path, &options, mask.as_ref())
     } else {
         presentation::heading("Dictionary", path);
-        dictionary::run(
-            path,
-            args.dict.as_deref().ok_or("Choose a recovery method")?,
-            args.verbose,
-        )
+        let library = wordlists::Library::new(args.wordlist_dir.as_deref(), args.offline)?;
+        let mut sources = args.dict;
+        if sources.iter().any(String::is_empty) {
+            archive::check_encrypted(path)?;
+            for source in sources.iter_mut().filter(|source| source.is_empty()) {
+                let Some(selected) = library.select()? else {
+                    presentation::note("Wordlist selection cancelled");
+                    return Ok(());
+                };
+                *source = selected;
+            }
+        }
+        library.handle_interrupts()?;
+        let options = dictionary::Options {
+            threads: args.threads.unwrap_or_else(num_cpus::get),
+            limit: args.limit,
+            refresh: args.refresh_wordlists,
+            rules: args.word_rules,
+            keep_duplicates: args.keep_duplicates,
+            min_length: args.word_min_length.unwrap_or(0),
+            max_length: args.word_max_length.unwrap_or(usize::MAX),
+        };
+        dictionary::run(path, &sources, &library, &options)
     }
 }
 

@@ -119,13 +119,16 @@ impl HeaderFilter {
     }
 
     #[inline]
-    #[cfg(test)]
     pub fn may_match(&self, password: &[u8]) -> bool {
         let mut keys = Keys::new();
         for &byte in password {
             keys.update(byte);
         }
-        self.check_batch([keys; 4])[0]
+        for &byte in &self.encrypted[..11] {
+            let plain = byte ^ keys.stream_byte();
+            keys.update(plain);
+        }
+        self.encrypted[11] ^ keys.stream_byte() == self.expected
     }
 }
 
