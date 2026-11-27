@@ -21,7 +21,7 @@ pub enum ColorMode {
     name = "zip-cracker",
     version,
     arg_required_else_help = true,
-    override_usage = "zip-cracker <ZIP> (--bkcrack | -g | -d [SOURCE]...) [OPTIONS]\n       zip-cracker wordlists <COMMAND> [OPTIONS]",
+    override_usage = "zip-cracker <ZIP> [--bkcrack | -g | -d [SOURCE]...] [OPTIONS]\n       zip-cracker wordlists <COMMAND> [OPTIONS]",
     subcommand_negates_reqs = true,
     args_conflicts_with_subcommands = true,
     propagate_version = true,
@@ -30,9 +30,9 @@ pub enum ColorMode {
 )]
 #[command(about = "Recover ZIP files with automatic plaintext attacks, masks or wordlists.")]
 #[command(group(ArgGroup::new("candidate_mode").args(["generate", "dict"]).multiple(false)))]
-#[command(group(ArgGroup::new("mode").args(["generate", "bkcrack", "dict"]).required(true).multiple(false)))]
+#[command(group(ArgGroup::new("mode").args(["generate", "bkcrack", "dict"]).multiple(false)))]
 pub struct Args {
-    #[arg(help = "Encrypted ZIP archive", required = true)]
+    #[arg(help = "ZIP archive to inspect or recover", required = true)]
     pub zip: Option<String>,
 
     #[command(subcommand)]
@@ -292,6 +292,8 @@ impl Args {
         let dim = AnsiColor::BrightBlack.on_default();
         let examples = StyledStr::from(format!(
             "{accent}Examples{accent:#}\n\
+             {dim}  Inspect an archive and choose a recovery mode{dim:#}\n\
+             {cyan}  zip-cracker archive.zip{cyan:#}\n\n\
              {dim}  Preview automatic plaintext assumptions{dim:#}\n\
              {cyan}  zip-cracker archive.zip --bkcrack --dry-run{cyan:#}\n\n\
              {dim}  Search a known password pattern{dim:#}\n\

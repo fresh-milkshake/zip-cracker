@@ -17,6 +17,46 @@ fn run_archive(name: &str, options: &[&str]) -> std::process::Output {
 }
 
 #[test]
+fn bare_archive_reports_encryption_and_compatible_modes_without_a_terminal() {
+    for (fixture, encryption, automatic_recovery) in [
+        ("abcde12.bin", "ZipCrypto", true),
+        ("deflated.bin", "ZipCrypto", false),
+        ("aes.bin", "AES", false),
+    ] {
+        let output = run_archive(fixture, &[]);
+        assert!(output.status.success(), "{fixture}: {:?}", output.stderr);
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("Files: 1 (1 encrypted)"), "{stdout}");
+        assert!(stdout.contains(&format!("Encryption: {encryption}: 1")));
+        assert!(stdout.contains("Wordlist (-d)"));
+        assert!(stdout.contains("Password pattern (-g --mask)"));
+        assert_eq!(stdout.contains("(--bkcrack)"), automatic_recovery);
+        assert!(!stdout.contains("Checked"));
+    }
+}
+
+#[test]
+fn bare_archive_reports_unencrypted_files_without_offering_recovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("open.zip");
+    let mut archive = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    archive.add_directory("empty", options).unwrap();
+    archive.start_file("document.txt", options).unwrap();
+    archive.finish().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Files: 1 (0 encrypted) · Directories: 1"));
+    assert!(stdout.contains("No files require a password."));
+    assert!(!stdout.contains("Available recovery modes"));
+}
+
+#[test]
 fn password_search_skips_an_unencrypted_directory_at_the_start() {
     let directory = tempfile::tempdir().unwrap();
     let dictionary = directory.path().join("words.txt");
@@ -25,6 +65,14 @@ fn password_search_skips_an_unencrypted_directory_at_the_start() {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/zips/unencrypted-directory-first.zip"
     );
+    let inspection = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .arg(archive)
+        .output()
+        .unwrap();
+    assert!(inspection.status.success());
+    assert!(String::from_utf8(inspection.stdout)
+        .unwrap()
+        .contains("Files: 1 (1 encrypted) · Directories: 1"));
 
     for options in [
         vec!["-g", "--mask", "a?l"],
@@ -156,7 +204,11 @@ fn finds_real_password_using_configured_search_space() {
 
 #[test]
 fn rejects_invalid_generation_options() {
-    assert_eq!(run(&[]).status.code(), Some(2));
+    let no_arguments = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .output()
+        .unwrap();
+    assert_eq!(no_arguments.status.code(), Some(2));
+    assert_eq!(run(&["--mask", "?d"]).status.code(), Some(2));
     for arguments in [
         vec!["-g", "--threads", "0"],
         vec!["-g", "--limit", "0"],
@@ -194,6 +246,30 @@ fn bkcrack_explains_unsupported_encryption_and_compression() {
         assert!(!output.status.success());
         assert!(String::from_utf8(output.stdout).unwrap().contains(reason));
     }
+}
+
+#[test]
+fn bkcrack_explains_missing_known_content_and_suggests_other_modes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("archive.zip");
+    std::fs::write(
+        &path,
+        include_bytes!("zips/unencrypted-directory-first.zip"),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+        .arg(path)
+        .arg("--bkcrack")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("No matching unencrypted copy or recognized file header"));
+    assert!(stdout.contains("protected/note.txt"));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("No passwords were tried"));
+    assert!(stderr.contains("Try a wordlist (-d) or a password pattern (-g --mask)"));
 }
 
 #[test]

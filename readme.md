@@ -39,6 +39,15 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fresh-milkshake/zip-cr
 
 ## Usage
 
+```bash
+zip-cracker archive.zip
+```
+
+This shows how many files need a password, the encryption types in use, and the
+available recovery modes. In an interactive terminal, use the arrow keys to
+choose a mode or press Esc to exit. With redirected input or output, the command
+prints the summary and available flags without starting a search.
+
 ### Password generation and masks
 
 Use `-g` to generate candidates from a character set or a known password pattern.

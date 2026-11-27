@@ -1,9 +1,87 @@
 use crate::zipcrypto::HeaderFilter;
 use crate::AppResult;
 use std::fs::File;
-use std::io::{self, Cursor, Read, Seek};
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
-use zip::ZipArchive;
+use zip::{CompressionMethod, ZipArchive};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Encryption {
+    ZipCrypto,
+    Aes,
+    Other,
+}
+
+pub(crate) fn read_encryption(
+    headers: &mut File,
+    entry: &zip::read::ZipFile<'_, File>,
+) -> AppResult<Option<Encryption>> {
+    if !entry.encrypted() {
+        return Ok(None);
+    }
+    headers.seek(SeekFrom::Start(entry.central_header_start()))?;
+    let mut header = [0; 12];
+    headers.read_exact(&mut header)?;
+    if &header[..4] != b"PK\x01\x02" {
+        return Err("Invalid ZIP central header".into());
+    }
+    let flags = u16::from_le_bytes([header[8], header[9]]);
+    let method = u16::from_le_bytes([header[10], header[11]]);
+    Ok(Some(match (method, flags & 0x40) {
+        (99, _) => Encryption::Aes,
+        (_, 0) => Encryption::ZipCrypto,
+        _ => Encryption::Other,
+    }))
+}
+
+pub(crate) const MIN_BKCRACK_ENTRY_SIZE: u64 = 12;
+
+#[derive(Default)]
+pub(crate) struct ArchiveInfo {
+    pub files: usize,
+    pub directories: usize,
+    pub zipcrypto: usize,
+    pub aes: usize,
+    pub other: usize,
+    pub password_search: bool,
+    pub bkcrack: bool,
+}
+
+pub(crate) fn inspect(path: &str) -> AppResult<ArchiveInfo> {
+    let mut archive = ZipArchive::new(File::open(path)?)?;
+    let mut headers = File::open(path)?;
+    let mut info = ArchiveInfo::default();
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index)?;
+        if entry.is_dir() {
+            info.directories += 1;
+            continue;
+        }
+        info.files += 1;
+        let Some(encryption) = read_encryption(&mut headers, &entry)? else {
+            continue;
+        };
+        if info.zipcrypto + info.aes + info.other == 0 {
+            info.password_search = encryption != Encryption::Other
+                && matches!(
+                    entry.compression(),
+                    CompressionMethod::Stored
+                        | CompressionMethod::Deflated
+                        | CompressionMethod::Bzip2
+                        | CompressionMethod::Zstd
+                );
+        }
+        match encryption {
+            Encryption::ZipCrypto => info.zipcrypto += 1,
+            Encryption::Aes => info.aes += 1,
+            Encryption::Other => info.other += 1,
+        }
+        info.bkcrack |= encryption == Encryption::ZipCrypto
+            && entry.compression() == CompressionMethod::Stored
+            && entry.size() >= MIN_BKCRACK_ENTRY_SIZE;
+    }
+    Ok(info)
+}
 
 pub fn check_encrypted(path: &str) -> AppResult {
     let mut archive = ZipArchive::new(File::open(path)?)?;

@@ -1,6 +1,7 @@
 use super::templates::{self, Confidence, PlaintextGuess};
+use crate::archive::{read_encryption, Encryption, MIN_BKCRACK_ENTRY_SIZE};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use zip::{CompressionMethod, ZipArchive};
 
@@ -35,22 +36,15 @@ fn entry_metadata(
         if entry.is_dir() {
             continue;
         }
-        headers.seek(SeekFrom::Start(entry.central_header_start()))?;
-        let mut header = [0; 46];
-        headers.read_exact(&mut header)?;
-        if &header[..4] != b"PK\x01\x02" {
-            return Err("Invalid ZIP central header".into());
-        }
-        let flags = u16::from_le_bytes([header[8], header[9]]);
-        let method = u16::from_le_bytes([header[10], header[11]]);
+        let encryption = read_encryption(&mut headers, &entry)?;
         entries.push(Entry {
             index,
             name: entry.name().into(),
             relative: entry.enclosed_name(),
             size: entry.size(),
             crc: entry.crc32(),
-            encrypted: flags & 1 != 0,
-            zipcrypto: flags & 1 != 0 && flags & 0x40 == 0 && method != 99,
+            encrypted: encryption.is_some(),
+            zipcrypto: encryption == Some(Encryption::ZipCrypto),
             stored: entry.compression() == CompressionMethod::Stored,
         });
     }
@@ -62,7 +56,7 @@ fn verified_copy(
     entry: &Entry,
     description: String,
 ) -> io::Result<Option<PlaintextGuess>> {
-    if !(12..=MAX_COPY).contains(&entry.size) {
+    if !(MIN_BKCRACK_ENTRY_SIZE..=MAX_COPY).contains(&entry.size) {
         return Ok(None);
     }
     let mut bytes = Vec::new();
@@ -96,7 +90,7 @@ pub fn discover(path: &Path) -> Result<Vec<Attack>, Box<dyn std::error::Error>> 
             println!("Skipping {:?}: compressed entry; original-file headers do not match the encrypted compressed stream", entry.name);
             continue;
         }
-        if entry.size < 12 {
+        if entry.size < MIN_BKCRACK_ENTRY_SIZE {
             println!(
                 "Skipping {:?}: only {} plaintext bytes, fewer than this bkcrack mode requires",
                 entry.name, entry.size
@@ -145,10 +139,10 @@ pub fn discover(path: &Path) -> Result<Vec<Attack>, Box<dyn std::error::Error>> 
             guesses = templates::for_entry(&entry.name, entry.size);
         }
         if guesses.is_empty() {
-            println!(
-                "No supported automatic plaintext assumption for {:?}",
+            crate::presentation::detail(format!(
+                "No matching unencrypted copy or recognized file header for {:?}",
                 entry.name
-            );
+            ));
         }
         for guess in guesses {
             attacks.push(Attack {
@@ -171,7 +165,7 @@ pub fn discover(path: &Path) -> Result<Vec<Attack>, Box<dyn std::error::Error>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{Seek, SeekFrom, Write};
 
     fn fixture(path: &Path) {
         std::fs::write(path, include_bytes!("../../tests/fixtures/abcde12.bin")).unwrap();

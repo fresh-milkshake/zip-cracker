@@ -43,7 +43,7 @@ pub fn run(path: &Path, options: &Options) -> Result<(), Box<dyn std::error::Err
     let attacks = discovery::discover(&path)?;
     if attacks.is_empty() {
         return Err(
-            "No applicable automatic bkcrack guesses; no password search was performed".into(),
+            "Automatic recovery could not find usable file content. No passwords were tried. Try a wordlist (-d) or a password pattern (-g --mask).".into(),
         );
     }
     crate::presentation::section(format!("Automatic plaintext candidates: {}", attacks.len()));
