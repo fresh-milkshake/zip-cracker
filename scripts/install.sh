@@ -79,16 +79,18 @@ get_latest_version() {
     print_message $GREEN "Latest version: $LATEST_VERSION"
 }
 
-install_binary() {
+install_binary() (
     local download_url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$LATEST_VERSION/$RELEASE_ASSET_NAME"
+    mkdir -p "$INSTALL_DIR"
     local temp_dir
-    temp_dir=$(mktemp -d)
+    temp_dir=$(mktemp -d "$INSTALL_DIR/.zip-cracker.XXXXXXXX")
     local temp_file="$temp_dir/zip-cracker"
+    trap 'rm -f -- "$temp_file"; rmdir -- "$temp_dir"' EXIT
 
     print_message $BLUE "Downloading zip-cracker from $download_url..."
 
     if command -v curl >/dev/null 2>&1; then
-        curl -L "$download_url" -o "$temp_file"
+        curl -fL "$download_url" -o "$temp_file"
     elif command -v wget >/dev/null 2>&1; then
         wget "$download_url" -O "$temp_file"
     else
@@ -96,18 +98,22 @@ install_binary() {
         exit 1
     fi
 
-    if [ ! -f "$temp_file" ]; then
-        print_message $RED "Error: Download failed"
+    if [ ! -s "$temp_file" ]; then
+        print_message $RED "Error: Downloaded file is missing or empty"
         exit 1
     fi
 
-    mkdir -p "$INSTALL_DIR"
-    mv "$temp_file" "$INSTALL_DIR/$BINARY_NAME"
-    chmod +x "$INSTALL_DIR/$BINARY_NAME"
-    print_message $GREEN "Binary installed to $INSTALL_DIR/$BINARY_NAME"
+    chmod +x "$temp_file"
+    local downloaded_version
+    if ! downloaded_version=$("$temp_file" --version) ||
+       [ "$downloaded_version" != "zip-cracker ${LATEST_VERSION#v}" ]; then
+        print_message $RED "Error: Downloaded binary did not report version $LATEST_VERSION"
+        exit 1
+    fi
 
-    rm -rf "$temp_dir"
-}
+    mv -f "$temp_file" "$INSTALL_DIR/$BINARY_NAME"
+    print_message $GREEN "Binary installed to $INSTALL_DIR/$BINARY_NAME"
+)
 
 configure_path() {
     local shell_config=""
@@ -126,8 +132,15 @@ configure_path() {
             ;;
         fish)
             if [ -d "$HOME/.config/fish" ]; then
-                echo "set -gx PATH $INSTALL_DIR \$PATH" >> "$HOME/.config/fish/config.fish"
-                print_message $GREEN "Added $INSTALL_DIR to PATH in Fish shell config"
+                shell_config="$HOME/.config/fish/config.fish"
+                local path_line='set -gx PATH "$HOME/.local/bin" $PATH'
+                if grep -Fxq -- "$path_line" "$shell_config" 2>/dev/null ||
+                   grep -Fxq -- "set -gx PATH $INSTALL_DIR \$PATH" "$shell_config" 2>/dev/null; then
+                    print_message $GREEN "$INSTALL_DIR already in PATH in Fish shell config"
+                else
+                    printf '%s\n' "$path_line" >> "$shell_config"
+                    print_message $GREEN "Added $INSTALL_DIR to PATH in Fish shell config"
+                fi
                 return
             fi
             ;;

@@ -62,35 +62,47 @@ function Install-Binary {
         [string]$Architecture
     )
     
+    $ErrorActionPreference = "Stop"
     $downloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/download/$Version/zip-cracker-windows-x64.exe"
-    $tempDir = [System.IO.Path]::GetTempPath()
-    $tempFile = Join-Path $tempDir "zip-cracker-$Version.exe"
-    
-    Write-ColorMessage "Downloading zip-cracker from $downloadUrl..." "Blue"
+    $tempFile = Join-Path $InstallDir ".zip-cracker-$([guid]::NewGuid()).exe"
+    $destPath = Join-Path $InstallDir $BinaryName
+    $expectedVersion = "zip-cracker $($Version -creplace '^v', '')"
     
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempFile -UseBasicParsing
-        
-        if (-not (Test-Path $tempFile)) {
-            throw "Download failed: File not found"
-        }
-        
         if (-not (Test-Path $InstallDir)) {
             New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
             Write-ColorMessage "Created installation directory: $InstallDir" "Blue"
         }
         
-        $destPath = Join-Path $InstallDir $BinaryName
-        
-        if ((Test-Path $destPath) -and -not $Force) {
-            $response = Read-Host "Binary already exists at $destPath. Overwrite? (y/N)"
-            if ($response -notmatch '^[Yy]') {
-                Write-ColorMessage "Installation cancelled by user." "Yellow"
-                return $false
+        if ((Test-Path -LiteralPath $destPath -PathType Leaf) -and -not $Force) {
+            try {
+                $installedVersion = & $destPath --version
+                if ($LASTEXITCODE -eq 0 -and ($installedVersion -join "`n") -ceq $expectedVersion) {
+                    Write-ColorMessage "zip-cracker $Version is already installed" "Green"
+                    return $true
+                }
+            }
+            catch {
+                Write-ColorMessage "The existing binary could not run. Reinstalling..." "Yellow"
             }
         }
         
-        Copy-Item $tempFile $destPath -Force
+        Write-ColorMessage "Downloading zip-cracker from $downloadUrl..." "Blue"
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempFile -UseBasicParsing
+        $downloadedVersion = & $tempFile --version
+        if ($LASTEXITCODE -ne 0) {
+            throw "Downloaded binary exited with code $LASTEXITCODE"
+        }
+        if (($downloadedVersion -join "`n") -cne $expectedVersion) {
+            throw "Downloaded binary did not report version $Version"
+        }
+
+        if (Test-Path -LiteralPath $destPath -PathType Leaf) {
+            [IO.File]::Replace($tempFile, $destPath, [NullString]::Value)
+        }
+        else {
+            [IO.File]::Move($tempFile, $destPath)
+        }
         Write-ColorMessage "Binary installed to $destPath" "Green"
         
         return $true
@@ -100,8 +112,8 @@ function Install-Binary {
         return $false
     }
     finally {
-        if (Test-Path $tempFile) {
-            Remove-Item $tempFile -Force
+        if (Test-Path -LiteralPath $tempFile) {
+            Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
         }
     }
 }
@@ -129,30 +141,6 @@ function Add-ToPath {
     }
 }
 
-function Test-Installation {
-    $binaryPath = Join-Path $InstallDir $BinaryName
-    
-    if (Test-Path $binaryPath) {
-        Write-ColorMessage "Installation successful!" "Green"
-        Write-ColorMessage "Binary location: $binaryPath" "Blue"
-        
-        try {
-            & $binaryPath --help | Out-Null
-            Write-ColorMessage "Binary is working correctly" "Green"
-            Write-ColorMessage "You can now run: zip-cracker --help" "Blue"
-        }
-        catch {
-            Write-ColorMessage "Warning: Binary installed but may not be working correctly" "Yellow"
-        }
-        
-        return $true
-    }
-    else {
-        Write-ColorMessage "Installation failed: Binary not found" "Red"
-        return $false
-    }
-}
-
 function Show-Usage {
     Write-ColorMessage "Zip Cracker Installation Script for Windows" "Green"
     Write-ColorMessage ""
@@ -161,7 +149,7 @@ function Show-Usage {
     Write-ColorMessage ""
     Write-ColorMessage "Parameters:" "Blue"
     Write-ColorMessage "  -InstallDir    Directory to install binary (default: %LOCALAPPDATA%\zip-cracker)" "White"
-    Write-ColorMessage "  -Force         Overwrite existing installation without prompting" "White"
+    Write-ColorMessage "  -Force         Reinstall even if the latest version is already installed" "White"
     Write-ColorMessage ""
     Write-ColorMessage "Examples:" "Blue"
     Write-ColorMessage "  # Install with custom directory" "White"
@@ -197,7 +185,7 @@ function Main {
         
         if ($success) {
             Add-ToPath
-            Test-Installation
+            Write-ColorMessage "You can now run: zip-cracker --help" "Blue"
             
             Write-ColorMessage "" "White"
             Write-ColorMessage "=== Installation Complete ===" "Green"
