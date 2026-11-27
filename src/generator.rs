@@ -1,16 +1,11 @@
-use crate::archive::is_right_password;
-use crate::zipcrypto::HeaderFilter;
+use crate::archive::CachedArchive;
 use indicatif::ProgressBar;
-use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use zip::ZipArchive;
 
 const BLOCK_SIZE: u64 = 4096;
 pub const MAX_PASSWORD_LENGTH: usize = 16;
 pub const DEFAULT_CHARSET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-type CachedArchive = ZipArchive<Cursor<Arc<[u8]>>>;
 
 pub struct GenerationOptions {
     pub min_length: u32,
@@ -92,11 +87,8 @@ fn search_length(
     let next = AtomicU64::new(0);
     let checked = AtomicU64::new(0);
     let found = AtomicBool::new(false);
-    let mut metadata = archive.clone();
-    let filter = metadata
-        .by_index_raw(0)
-        .ok()
-        .and_then(|entry| HeaderFilter::from_entry(archive.clone().into_inner().get_ref(), &entry))
+    let filter = archive
+        .filter
         .map(|header| header.prepare(options.charset.as_bytes(), length));
     let threads = (options.threads as u64).min(count.div_ceil(BLOCK_SIZE)) as usize;
     let password = std::thread::scope(|scope| {
@@ -148,7 +140,7 @@ fn search_length(
                             attempts += batch_size as u64;
                             for lane in 0..batch_size {
                                 if matches[lane]
-                                    && is_right_password(&mut archive, &candidates[lane][..length])
+                                    && archive.verify_password(&candidates[lane][..length])
                                 {
                                     found.store(true, Ordering::Relaxed);
                                     result = Some(
@@ -192,9 +184,7 @@ pub fn generate_attack(
 ) -> Result<GenerationResult, Box<dyn std::error::Error>> {
     let total = options.total()?;
     let started = Instant::now();
-    // One archive-sized allocation avoids disk seeks for each password, regardless of search size.
-    let bytes: Arc<[u8]> = std::fs::read(zip_path)?.into();
-    let archive = ZipArchive::new(Cursor::new(bytes))?;
+    let archive = CachedArchive::open(zip_path)?;
     let progress = crate::presentation::progress(total, "Character search");
     let mut checked = 0;
     let mut password = None;
@@ -243,10 +233,11 @@ mod tests {
     }
 
     fn archive() -> CachedArchive {
-        let bytes: Arc<[u8]> = include_bytes!("../tests/fixtures/abcde12.bin")
-            .as_slice()
-            .into();
-        ZipArchive::new(Cursor::new(bytes)).unwrap()
+        CachedArchive::open(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/abcde12.bin"
+        ))
+        .unwrap()
     }
 
     #[test]

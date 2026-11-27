@@ -1,11 +1,7 @@
-use crate::archive::is_right_password;
+use crate::archive::CachedArchive;
 use crate::generator::{GenerationResult, MAX_PASSWORD_LENGTH};
-use crate::zipcrypto::HeaderFilter;
-use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
-use zip::ZipArchive;
 
 const BLOCK_SIZE: u64 = 16_384;
 
@@ -84,12 +80,8 @@ pub fn generate_mask_attack(
         return Err("Threads and limit must be greater than zero".into());
     }
     let started = Instant::now();
-    let bytes: Arc<[u8]> = std::fs::read(path)?.into();
-    let mut archive = ZipArchive::new(Cursor::new(bytes.clone()))?;
-    let filter = archive
-        .by_index_raw(0)
-        .ok()
-        .and_then(|entry| HeaderFilter::from_entry(&bytes, &entry));
+    let archive = CachedArchive::open(path)?;
+    let filter = archive.filter;
     let total = limit.unwrap_or(mask.count).min(mask.count);
     let progress = crate::presentation::progress(total, "Mask search");
     let next = AtomicU64::new(0);
@@ -136,7 +128,7 @@ pub fn generate_mask_attack(
                             attempts += batch_size as u64;
                             for lane in 0..batch_size {
                                 if matches[lane]
-                                    && is_right_password(&mut archive, &candidates[lane][..length])
+                                    && archive.verify_password(&candidates[lane][..length])
                                 {
                                     found.store(true, Ordering::Relaxed);
                                     result = Some(

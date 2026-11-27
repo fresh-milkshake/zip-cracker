@@ -212,7 +212,7 @@ mod tests {
                 assert_eq!(filter.may_match(password.as_bytes()), expected);
                 if expected {
                     header_matches += 1;
-                    assert!(!is_right_password(&mut archive, password.as_bytes()));
+                    assert!(!is_right_password(&mut archive, 0, password.as_bytes()));
                 }
             }
             assert!(header_matches > 0);
@@ -305,7 +305,7 @@ mod tests {
         let mut archive = ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
         let filter = HeaderFilter::from_entry(&bytes, &archive.by_index_raw(0).unwrap()).unwrap();
         assert!(filter.may_match(b"abcde12"));
-        assert!(is_right_password(&mut archive, b"abcde12"));
+        assert!(is_right_password(&mut archive, 0, b"abcde12"));
         for index in 0..1000 {
             let password = format!("wrong{index}");
             assert_eq!(

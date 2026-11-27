@@ -1,15 +1,11 @@
 mod producer;
 
-use crate::archive::is_right_password;
+use crate::archive::CachedArchive;
 use crate::wordlists::Library;
-use crate::zipcrypto::HeaderFilter;
 use crate::{presentation, AppResult};
 use crossbeam_channel::bounded;
-use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
-use zip::ZipArchive;
 
 struct WorkerGuard<'a>(&'a AtomicBool);
 
@@ -37,14 +33,9 @@ pub fn run(zip_path: &str, sources: &[String], library: &Library, options: &Opti
             "Threads/limit must be positive and minimum word length must not exceed maximum".into(),
         );
     }
-    crate::archive::check_encrypted(zip_path)?;
     let started = Instant::now();
-    let bytes: Arc<[u8]> = std::fs::read(zip_path)?.into();
-    let mut archive = ZipArchive::new(Cursor::new(bytes.clone()))?;
-    let filter = archive
-        .by_index_raw(0)
-        .ok()
-        .and_then(|entry| HeaderFilter::from_entry(&bytes, &entry));
+    let archive = CachedArchive::open(zip_path)?;
+    let filter = archive.filter;
     let progress = presentation::streaming_progress("Dictionary");
     let found = AtomicBool::new(false);
     // Batches cap both candidate count and bytes; memory is independent of dictionary size.
@@ -69,7 +60,7 @@ pub fn run(zip_path: &str, sources: &[String], library: &Library, options: &Opti
                         if filter
                             .as_ref()
                             .is_none_or(|header| header.may_match(&password))
-                            && is_right_password(&mut archive, &password)
+                            && archive.verify_password(&password)
                         {
                             if found
                                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)

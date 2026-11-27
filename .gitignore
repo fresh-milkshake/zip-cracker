@@ -1,5 +1,6 @@
 /target
 *.zip
+!/tests/zips/unencrypted-directory-first.zip
 /dictionaries
 *.exe
 .gitignore

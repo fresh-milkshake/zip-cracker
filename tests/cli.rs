@@ -17,6 +17,49 @@ fn run_archive(name: &str, options: &[&str]) -> std::process::Output {
 }
 
 #[test]
+fn password_search_skips_an_unencrypted_directory_at_the_start() {
+    let directory = tempfile::tempdir().unwrap();
+    let dictionary = directory.path().join("words.txt");
+    std::fs::write(&dictionary, "aa\nab\n").unwrap();
+    let archive = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/zips/unencrypted-directory-first.zip"
+    );
+
+    for options in [
+        vec!["-g", "--mask", "a?l"],
+        vec![
+            "-g",
+            "--min-length",
+            "2",
+            "--max-length",
+            "2",
+            "--charset",
+            "ab",
+        ],
+        vec!["-d", dictionary.to_str().unwrap(), "--offline"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_zip-cracker"))
+            .arg(archive)
+            .args(&options)
+            .args(["--threads", "1", "--wordlist-dir"])
+            .arg(directory.path().join("wordlists"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{options:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            stdout.contains("Password found: ab"),
+            "{options:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn mask_recovers_passwords_with_zipcrypto_and_aes() {
     for (fixture, mask, expected) in [
         ("abcde12.bin", "abcde?d?d", "abcde12"),

@@ -21,7 +21,6 @@ fn run_generate_attack(
     options: &GenerationOptions,
     mask: Option<&Mask>,
 ) -> AppResult {
-    archive::check_encrypted(zip_path)?;
     let cancelled = AtomicBool::new(false);
     let result = if let Some(mask) = mask {
         generate_mask_attack(zip_path, mask, options.threads, options.limit, &cancelled)?
