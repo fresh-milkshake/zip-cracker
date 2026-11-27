@@ -1537,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "zip-cracker"
-version = "3.3.0"
+version = "3.4.0"
 dependencies = [
  "clap",
  "console",
@@ -1547,7 +1547,9 @@ dependencies = [
  "dialoguer",
  "flate2",
  "fs2",
+ "hashbrown",
  "indicatif",
+ "memchr",
  "num_cpus",
  "serde",
  "serde_json",

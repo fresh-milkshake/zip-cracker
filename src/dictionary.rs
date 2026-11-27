@@ -36,10 +36,12 @@ pub fn run(zip_path: &str, sources: &[String], library: &Library, options: &Opti
     let started = Instant::now();
     let archive = CachedArchive::open(zip_path)?;
     let filter = archive.filter;
+    let batch_entries = if filter.is_some() { 1024 } else { 32 };
     let progress = presentation::streaming_progress("Dictionary");
+    let producer_thread = std::thread::current();
     let found = AtomicBool::new(false);
     // Batches cap both candidate count and bytes; memory is independent of dictionary size.
-    let (sender, receiver) = bounded::<Vec<Vec<u8>>>(8);
+    let (sender, receiver) = bounded::<producer::Batch>(8);
     let result = std::thread::scope(|scope| -> AppResult<(Option<Vec<u8>>, u64)> {
         let mut workers = Vec::new();
         for _ in 0..options.threads {
@@ -47,31 +49,33 @@ pub fn run(zip_path: &str, sources: &[String], library: &Library, options: &Opti
             let mut archive = archive.clone();
             let found = &found;
             let progress = &progress;
+            let producer_thread = &producer_thread;
             workers.push(scope.spawn(move || {
                 let _guard = WorkerGuard(found);
                 while let Ok(batch) = receiver.recv() {
                     let mut checked = 0;
                     let mut result = None;
-                    for password in batch {
+                    for password in batch.iter() {
                         if found.load(Ordering::Relaxed) || library.is_cancelled() {
                             break;
                         }
                         checked += 1;
                         if filter
                             .as_ref()
-                            .is_none_or(|header| header.may_match(&password))
-                            && archive.verify_password(&password)
+                            .is_none_or(|header| header.may_match(password))
+                            && archive.verify_password(password)
                         {
                             if found
                                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
                                 .is_ok()
                             {
-                                result = Some(password);
+                                result = Some(password.to_vec());
                             }
                             break;
                         }
                     }
                     progress.inc(checked);
+                    producer_thread.unpark();
                     if found.load(Ordering::Relaxed) || library.is_cancelled() {
                         return result;
                     }
@@ -80,7 +84,15 @@ pub fn run(zip_path: &str, sources: &[String], library: &Library, options: &Opti
             }));
         }
         drop(receiver);
-        let produced = producer::send(sources, library, options, &found, &sender, &progress);
+        let produced = producer::send(
+            sources,
+            library,
+            options,
+            &found,
+            &sender,
+            &progress,
+            batch_entries,
+        );
         drop(sender);
         // Stop promptly on read/download errors, but join all workers before returning.
         if produced.is_err() {
